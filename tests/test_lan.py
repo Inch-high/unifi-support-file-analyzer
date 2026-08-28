@@ -126,14 +126,14 @@ def main():
     with tempfile.TemporaryDirectory() as td:
         flows = [TCP.format(state="ESTABLISHED", src="10.10.20.9",
                             dst="203.0.113.30", dport="23")]
-        leases = ["1787912620 98:b7:85:25:4d:87 10.10.20.9 LivingRoomCam "
-                  "01:98:b7:85:25:4d:87"]
-        neigh = ["10.10.20.9 dev br20 lladdr 98:b7:85:25:4d:87 ref 1 "
+        leases = ["1787912620 00:00:5e:00:53:87 10.10.20.9 ExampleCam "
+                  "01:00:00:5e:00:53:87"]
+        neigh = ["10.10.20.9 dev br20 lladdr 00:00:5e:00:53:87 ref 1 "
                  "used 96/96/96 probes 2 REACHABLE"]
         r = lan.analyze_lan(build(td, flows, leases, neigh))
         d = device(r, "10.10.20.9")
-        check("device name resolved from the lease table", d["name"] == "LivingRoomCam")
-        check("hardware address resolved", d["mac"] == "98:b7:85:25:4d:87")
+        check("device name resolved from the lease table", d["name"] == "ExampleCam")
+        check("hardware address resolved", d["mac"] == "00:00:5e:00:53:87")
         check("network interface resolved", d["interface"] == "br20")
 
     with tempfile.TemporaryDirectory() as td:
