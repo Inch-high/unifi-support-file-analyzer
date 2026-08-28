@@ -78,7 +78,7 @@ def _is_private(ip):
 def _read(root: Path, rel):
     p = root / rel
     try:
-        return p.read_text(errors="replace") if p.is_file() else ""
+        return p.read_text(encoding="utf-8", errors="replace") if p.is_file() else ""
     except OSError:
         return ""
 

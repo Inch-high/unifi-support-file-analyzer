@@ -38,6 +38,12 @@ jobs:
       - name: Check every module imports
         run: python -c "import analyzer.app; print('imports ok')"
 
+      - name: Archive extraction and path containment
+        run: python tests/test_bundle.py
+
+      - name: Encoding is not left to the platform
+        run: python tests/test_encoding.py
+
       - name: Process audit
         run: python tests/test_procaudit.py
 

@@ -56,7 +56,7 @@ def detect_cores(root: Path):
         if not p.exists():
             continue
         try:
-            head = p.read_text(errors="replace")[:400_000]
+            head = p.read_text(encoding="utf-8", errors="replace")[:400_000]
         except OSError:
             continue
         m = re.search(r"SMP: Total of (\d+) processors", head)

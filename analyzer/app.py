@@ -1,5 +1,6 @@
 """Local web app for analyzing UniFi support files."""
 import shutil
+from collections import deque
 from datetime import datetime
 from pathlib import Path
 
@@ -16,12 +17,16 @@ from .logutil import build_offset_map, open_log
 BASE = Path(__file__).resolve().parent.parent
 STATIC = BASE / "static"
 
+# Upper bound on what the file viewer will return in one response, so a large
+# `tail` cannot ask the server to hold an entire log in memory again.
+MAX_TAIL_LINES = 100_000
+
 app = FastAPI(title="UniFi Support File Analyzer")
 
 
 @app.get("/", response_class=HTMLResponse)
 def index():
-    return (STATIC / "index.html").read_text()
+    return (STATIC / "index.html").read_text(encoding="utf-8")
 
 
 @app.get("/api/bundles")
@@ -30,9 +35,17 @@ def api_bundles():
 
 
 @app.post("/api/upload")
-async def api_upload(file: UploadFile = File(...)):
+def api_upload(file: UploadFile = File(...)):
+    """Take an uploaded support file and extract it.
+
+    Deliberately a plain def rather than async. Both the copy and the
+    extraction below are blocking, and a support file runs to a few hundred
+    megabytes, so on the event loop they stopped the server answering anything
+    at all until the upload finished. FastAPI hands a sync endpoint to its
+    worker threads, which is what this wants.
+    """
     bundle.UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-    dest = bundle.UPLOADS_DIR / Path(file.filename).name
+    dest = bundle.UPLOADS_DIR / Path(file.filename or "upload.tgz").name
     with dest.open("wb") as fh:
         shutil.copyfileobj(file.file, fh)
     try:
@@ -74,7 +87,8 @@ def _analyze(bid: str, force=False):
     fx = forensics.analyze_reboots(bt, ls, mem, cp, gc, pa)
     ln = lan.analyze_lan(root)
     ramoops_file = root / "system/kernel/ramoops/console-ramoops-0"
-    ramoops = ramoops_file.read_text(errors="replace") if ramoops_file.exists() else ""
+    ramoops = (ramoops_file.read_text(encoding="utf-8", errors="replace")
+               if ramoops_file.exists() else "")
     fd = findings.build_findings(ov, bt, mem, ls, ramoops, cp, gc, pa, tp)
     result = {"id": bid, "overview": ov, "boots": bt, "memory": mem, "cpu": cp,
               "gc": gc, "logscan": ls, "coverage": cov, "procaudit": pa,
@@ -182,7 +196,7 @@ def api_ramoops(bid: str):
     p = root / "system/kernel/ramoops/console-ramoops-0"
     if not p.exists():
         raise HTTPException(404, "No ramoops capture in this bundle")
-    return p.read_text(errors="replace")
+    return p.read_text(encoding="utf-8", errors="replace")
 
 
 @app.get("/api/bundle/{bid}/files")
@@ -205,16 +219,24 @@ def api_file(bid: str, path: str, tail: int = 3000, q: str = ""):
         raise HTTPException(400, "Invalid path")
     if not p.is_file():
         raise HTTPException(404, "No such file")
+    # Streamed through a bounded deque rather than read whole. Only the last
+    # `tail` lines are ever returned, but readlines() held the entire file in
+    # memory first, and the kernel log in a support bundle reaches hundreds of
+    # megabytes. The count still covers every matching line in the file.
+    tail = max(1, min(tail, MAX_TAIL_LINES))
+    ql = q.lower() if q else ""
+    kept = deque(maxlen=tail)
+    total = 0
     try:
         with open_log(p) as fh:
-            lines = fh.readlines()
+            for line in fh:
+                if ql and ql not in line.lower():
+                    continue
+                total += 1
+                kept.append(line)
     except (OSError, RuntimeError, UnicodeDecodeError) as e:
         raise HTTPException(400, f"Could not read: {e}")
-    if q:
-        ql = q.lower()
-        lines = [ln for ln in lines if ql in ln.lower()]
-    total = len(lines)
-    lines = lines[-tail:]
+    lines = list(kept)
     header = f"### {path}, showing {len(lines)} of {total} lines" + \
              (f" matching '{q}'" if q else "") + "\n"
     return header + "".join(lines)
