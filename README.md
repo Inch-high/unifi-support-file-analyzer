@@ -331,7 +331,7 @@ while the list below showed none and Ctrl+F found nothing. A cap that isn't stat
 reads as "this is everything". All files now render, category rows filter the list, and a search box matches on path, category or value.
 
 Masking has the same trap: searching for your own address cannot match
-`al*****@g****.com`. A **Reveal actual values** toggle re-runs the scan unmasked so
+`sa*****@e*****.com`. A **Reveal actual values** toggle re-runs the scan unmasked so
 values are searchable. Revealed results are held in memory only and never written to
 `data/`, the extracted bundle already sits on disk, and concentrating every secret
 from it into one cache file is a risk not worth adding.
@@ -339,7 +339,7 @@ from it into one cache file is a risk not worth adding.
 **Counts are of distinct values, and that distinction is not cosmetic.** Counting
 occurrences instead reported "2,860 email addresses" for what was really *one*
 address: a certificate subject repeated 2,610 times in a VPN log, kernel copyright
-banners (`giometti@linux.it`, `Jason@zx2c4.com`), a package maintainer field, and a
+banners carrying their authors' addresses, a package maintainer field, and a
 log path (`/var/log/rabbitmq/rabbitmq@localhost.log`) that merely looks like an
 address. After filtering software boilerplate and counting distinct values, the honest
 figure is one genuinely personal address. Occurrence counts are still shown, as the

@@ -82,10 +82,14 @@ def main():
     check("real public IP still reported", bool(hits("public_ip", "peer 8.8.8.8")))
 
     print("\nSoftware boilerplate is not personal data:")
+    # These mirror the shape of real kernel and library banners without
+    # carrying anyone's actual address. What suppresses them is the word
+    # "copyright" in the line, not the address, so a fictional one exercises
+    # the same path. Please keep them fictional.
     check("kernel copyright banner", not hits(
-        "email", "pps_core: Copyright 2005-2007 Rodolfo Giometti <giometti@linux.it>"))
+        "email", "pps_core: Copyright 2005-2007 Example Author <author@example.org>"))
     check("library author banner", not hits(
-        "email", "wireguard: Copyright (C) 2015 Jason A. Donenfeld <Jason@zx2c4.com>."))
+        "email", "examplevpn: Copyright (C) 2015 A. N. Other <author@example.com>."))
     check("package maintainer field", not hits("email", "Maintainer: support@ui.com"))
     check("certificate subject", not hits(
         "email", "VERIFY OK: depth=1, O=ExampleVPN, emailAddress=support@examplevpn.com"))
