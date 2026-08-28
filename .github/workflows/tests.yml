@@ -73,6 +73,9 @@ jobs:
       - name: Sanitised export
         run: python tests/test_sanitise.py
 
+      - name: Retention summary
+        run: python tests/test_coverage.py
+
       # The first test of the browser half of this tool. It loads the real
       # static/app.js, so a change there is checked here rather than only in
       # whatever the person making it happened to click on.

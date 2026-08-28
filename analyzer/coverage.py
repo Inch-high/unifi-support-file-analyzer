@@ -69,7 +69,14 @@ def _first_last(path: Path):
                 if size > TAIL_BYTES:
                     fh.seek(size - TAIL_BYTES)
                     fh.readline()  # discard the partial line
-                tail = fh.readlines()[-EDGE_LINES:]
+                    tail = fh.readlines()[-EDGE_LINES:]
+                else:
+                    # Reading the head of a short log already consumed all of
+                    # it, so reading on from here returns nothing and the file
+                    # ends up with a start date and no end date. Whatever the
+                    # head holds is the whole file when it is shorter than the
+                    # head, and the rest of it when it is not.
+                    tail = (head + fh.readlines())[-EDGE_LINES:]
             first = next((t for t in map(parse_ts, head) if t), None)
             last = next((t for t in map(parse_ts, reversed(tail)) if t), None)
             return first, last
