@@ -5,9 +5,15 @@ cd "$(dirname "$0")"
 
 PORT="${PORT:-8077}"
 
-if [ ! -d .venv ]; then
+# The directory existing is not the same as the install having finished: an
+# interrupted first run leaves .venv behind with nothing in it, and testing
+# only for the directory made that state permanent. Ask the environment
+# whether it can import what the app needs.
+if [ ! -x .venv/bin/python ] \
+   || ! ./.venv/bin/python -c 'import fastapi, uvicorn, zstandard, multipart' \
+        >/dev/null 2>&1; then
   echo "Creating virtualenv and installing dependencies…"
-  python3 -m venv .venv
+  [ -x .venv/bin/python ] || python3 -m venv .venv
   ./.venv/bin/pip -q install --upgrade pip
   ./.venv/bin/pip -q install -r requirements.txt
 fi
