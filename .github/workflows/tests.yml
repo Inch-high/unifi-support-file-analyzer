@@ -32,6 +32,12 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
+      # For the browser code. The runners ship a Node already, but which one
+      # is not this repository's decision to leave to chance.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
       - name: Install dependencies
         run: python -m pip install --quiet --upgrade pip -r requirements.txt
 
@@ -66,3 +72,12 @@ jobs:
 
       - name: Sanitised export
         run: python tests/test_sanitise.py
+
+      - name: Retention summary
+        run: python tests/test_coverage.py
+
+      # The first test of the browser half of this tool. It loads the real
+      # static/app.js, so a change there is checked here rather than only in
+      # whatever the person making it happened to click on.
+      - name: History tab
+        run: node tests/test_history_view.js

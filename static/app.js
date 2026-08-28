@@ -870,7 +870,44 @@ function viewHistory() {
   const c = state.data.coverage;
   if (!c) { render(el('div', { className: 'card' }, 'No coverage data.')); return; }
 
-  const dated = c.sources.filter(s => s.from && s.to);
+  // A source counts towards the timeline only if both its ends can actually be
+  // turned into a date. A log whose timestamps the parser did not recognise
+  // arrives here with from and to null, and one unreadable date poisons the
+  // whole scale, so both are excluded rather than left to become NaN.
+  const dated = c.sources.filter(s =>
+    s.from && s.to && !isNaN(Date.parse(s.from)) && !isNaN(Date.parse(s.to)));
+
+  const table = el('div', { className: 'table-wrap', style: 'margin-top:15px' },
+    el('table', {},
+      el('thead', {}, el('tr', {}, ...['Source', 'Path', 'Files', 'From', 'To', 'Span', 'Notes']
+        .map(h => el('th', {}, h)))),
+      el('tbody', {}, ...c.sources.map(s => el('tr', {},
+        el('td', {}, s.label),
+        el('td', { className: 'num' }, s.path),
+        el('td', { className: 'num' }, String(s.files)),
+        el('td', { className: 'num' }, s.from ? fmtDate(s.from) : '-'),
+        el('td', { className: 'num' }, s.to ? fmtDate(s.to) : '-'),
+        el('td', { className: 'num' }, s.days != null ? s.days + ' d' : '-'),
+        el('td', { className: 'small muted' }, s.note || ''))))));
+
+  // Nothing datable means there is no scale to draw the bars against, and
+  // asking for one produces an invalid date rather than an empty chart. The
+  // table still says which logs were found and, in its notes, why none of
+  // them could be placed in time, so show that on its own.
+  if (!dated.length) {
+    render(
+      el('div', { className: 'card' },
+        el('h3', {}, 'How far back you can look'),
+        el('p', { className: 'small muted', style: 'margin:0' },
+          'No log in this bundle carries timestamps this tool could read, so ' +
+          'none of them can be placed on a timeline and there is no retention ' +
+          'chart to draw. The sources found are listed below; open them from ' +
+          'Browse files to read them directly. Answers elsewhere in the tool ' +
+          'that depend on dates will be missing for the same reason.')),
+      table);
+    return;
+  }
+
   const t0 = Math.min(...dated.map(s => Date.parse(s.from)));
   const t1 = Math.max(...dated.map(s => Date.parse(s.to)));
   const span = Math.max(t1 - t0, 1);
@@ -932,15 +969,6 @@ function viewHistory() {
         })));
   });
 
-  const rows = c.sources.map(s => el('tr', {},
-    el('td', {}, s.label),
-    el('td', { className: 'num' }, s.path),
-    el('td', { className: 'num' }, String(s.files)),
-    el('td', { className: 'num' }, s.from ? fmtDate(s.from) : '-'),
-    el('td', { className: 'num' }, s.to ? fmtDate(s.to) : '-'),
-    el('td', { className: 'num' }, s.days != null ? s.days + ' d' : '-'),
-    el('td', { className: 'small muted' }, s.note || '')));
-
   render(intro,
     el('div', { className: 'card', style: 'margin-top:15px' },
       el('h3', {}, 'Retention by source'),
@@ -950,10 +978,7 @@ function viewHistory() {
         'finish at the right-hand edge and a short bar means the log only ' +
         'reaches back a little way.'),
       axis, ...bars),
-    el('div', { className: 'table-wrap', style: 'margin-top:15px' }, el('table', {},
-      el('thead', {}, el('tr', {}, ...['Source', 'Path', 'Files', 'From', 'To', 'Span', 'Notes']
-        .map(h => el('th', {}, h)))),
-      el('tbody', {}, ...rows))));
+    table);
 }
 
 
