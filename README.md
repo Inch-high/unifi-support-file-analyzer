@@ -1,45 +1,172 @@
 # UniFi Support File Analyzer
 
-**The guide, with screenshots and per-platform setup, is in [`docs/index.html`](docs/index.html).**
-Open that file in a browser. If this repository is ever made public and GitHub
-Pages is turned on for the `docs/` folder, the same page is served at
-<https://Inch-high.github.io/unifi-support-file-analyzer/>.
+A UniFi support file is about 1,700 files and a few hundred megabytes of logs.
+This reads it and answers the questions you actually have: why did the gateway
+restart, what was using the processor, is anything running that should not be,
+what are the devices on my network talking to, and what personal information
+would I hand over if I sent this file to support.
 
-> Built by prompting an AI rather than typed by hand. That is said plainly so
-> you can judge what you are running: every analysis states the evidence behind
-> it and the limits of that evidence, and where the support file cannot answer
-> something the tool says so instead of guessing. It exists to make your console
-> legible, and to let a conversation with UniFi support start from specifics
-> rather than "it keeps rebooting". Not an official Ubiquiti tool. It reads
-> files and never changes your device.
+It runs entirely on your own machine. There is no cloud service and no
+telemetry. It reads files and never changes your device. It is not an official
+Ubiquiti tool and has no connection to Ubiquiti.
 
-A local web app for digging into UniFi support files (`support-XXXX-*.tgz`), built
-for working out why a UDM Pro reboots or hangs, without clicking through 1,700 files
-by hand.
+> ### About how this was built
+>
+> This tool was written by prompting an AI, in conversation, rather than typed
+> line by line. That is worth saying plainly, for two reasons.
+>
+> The first is transparency. You should know what you are running and judge it
+> accordingly. Every analysis states the evidence it rests on and the limits of
+> that evidence, and the code carries comments explaining why each rule is
+> written the way it is, including the false alarms that shaped it. Where the
+> support file cannot answer something, the tool says so instead of guessing.
+> Read it, and check anything that matters before acting on it.
+>
+> The second is the point of the thing. A UniFi console tells you that something
+> went wrong, rarely why. This exists to make the underlying evidence legible,
+> so that you understand your own network better and so that a conversation with
+> UniFi support can start from specifics such as "the Network application ran
+> out of working memory for 8.9 hours before this restart, here is the log"
+> rather than "it keeps rebooting". That tends to get to an answer faster.
 
-Everything runs on your own machine. Nothing is uploaded anywhere.
+## What it looks like
 
-## Running it
+Every screenshot below comes from a real support file that was first put through
+this tool's own cleaning step, so every address, device name and identifier in
+them is a stand-in.
 
-Works on Windows, macOS and Linux. You need Python 3.9 or newer.
+### Findings
 
-```bash
+What looks wrong, ranked, each with the evidence behind it. Here the Network
+application had run out of working memory and pinned three of four processor
+cores for nearly nine hours before the device restarted.
+
+![The Findings tab, listing ranked problems with the evidence for each](docs/screenshots/findings.png)
+
+### Restart causes
+
+Every restart checked against what was recorded in the six hours before it, then
+grouped. On this device four restarts share one cause and the rest do not, which
+means more than one fault, and explains why fixing one thing had not stopped
+them.
+
+![The Restart causes tab, grouping restarts by likely cause](docs/screenshots/forensics.png)
+
+### Processor
+
+The support file holds no processor history at all, only a single instant. This
+is rebuilt by comparing counters between hourly snapshots. The climb at the
+right is one process taking almost three cores.
+
+![The CPU tab with a per-process chart and memory cleanup analysis](docs/screenshots/cpu.png)
+
+### Network devices
+
+What each device behind the gateway was connecting to, with unusual
+destinations flagged. It is a snapshot of connections that were open at capture,
+not a period of monitoring, and the page says so rather than letting you read
+too much into it.
+
+![The Network devices tab listing devices and what they connected to](docs/screenshots/network.png)
+
+### Processes
+
+Every process seen across all retained snapshots, with anything outside the
+normal UniFi software flagged: running from writable storage, running a deleted
+file, borrowing a kernel thread's name, or listening on an odd port.
+
+![The Processes tab listing every process seen](docs/screenshots/processes.png)
+
+### Privacy
+
+What a support file would reveal if you sent it. Values are masked, counts are
+of distinct values rather than repetitions, and the button at the top writes a
+cleaned copy you can actually share.
+
+![The Privacy tab showing what personal data the file contains](docs/screenshots/privacy.png)
+
+### History
+
+How far back each log actually goes. Start here when an analysis looks empty,
+because "nothing happened" and "nobody was writing it down" look identical
+otherwise. Note the memory snapshots cover three days while the kernel log
+covers eight months.
+
+![The History tab showing how far back each log reaches](docs/screenshots/history.png)
+
+## Installing and running it
+
+You need [Python 3.9 or newer](https://www.python.org/downloads/). Nothing else.
+The first run creates its own isolated environment and installs what it needs.
+
+<details>
+<summary><b>Windows</b></summary>
+
+Install Python from [python.org](https://www.python.org/downloads/windows/) and
+tick **"Add python.exe to PATH"** during setup. Then, in PowerShell:
+
+```powershell
+git clone https://github.com/Inch-high/unifi-support-file-analyzer.git
+cd unifi-support-file-analyzer
 python run.py
 ```
 
-On Windows you can double-click `run.bat` instead. On macOS and Linux `./run.sh`
-still works.
+Or download the project as a ZIP, unzip it, and double-click `run.bat`.
 
-That creates the virtualenv on first run, imports any `.tgz` sitting in the project
-folder, starts the server on <http://127.0.0.1:8077>, and opens a browser. You can
-also drag a support file onto the page, or pass one explicitly:
+If Windows says `python` is not recognised, try `py run.py`.
+
+</details>
+
+<details>
+<summary><b>macOS</b></summary>
+
+macOS includes Python 3. In Terminal:
 
 ```bash
-./run.sh ~/Downloads/support-XXXX-1234567890.tgz
+git clone https://github.com/Inch-high/unifi-support-file-analyzer.git
+cd unifi-support-file-analyzer
+python3 run.py
 ```
 
-Extracted bundles and cached analysis live in `data/`. Analysis is cached per bundle;
-"Re-analyze" forces a fresh pass.
+If macOS asks you to install developer tools the first time you run `git`,
+accept, then run the commands again. You can also download the ZIP instead of
+using git.
+
+</details>
+
+<details>
+<summary><b>Linux</b></summary>
+
+Most distributions ship Python 3. On Debian or Ubuntu you may need the
+virtual-environment package first:
+
+```bash
+sudo apt install python3 python3-venv git
+git clone https://github.com/Inch-high/unifi-support-file-analyzer.git
+cd unifi-support-file-analyzer
+python3 run.py
+```
+
+On Fedora: `sudo dnf install python3 git`. On Arch: `sudo pacman -S python git`.
+
+</details>
+
+Your browser opens at <http://127.0.0.1:8077>. Drag a support file onto the
+page, or put it in the project folder before starting and it will be picked up.
+You can also pass one directly:
+
+```bash
+python run.py ~/Downloads/support-XXXX-1234567890.tgz
+```
+
+Extracted files and cached analysis live in `data/`, which is excluded from git.
+Analysis is cached per support file; "Re-analyze" forces a fresh pass.
+
+### Getting a support file from your console
+
+In the UniFi console: **Settings**, then **Control Plane**, then **Console**,
+and choose to download the support file. It arrives as
+`support-XXXX-NNNNNNNNNN.tgz`. Exact wording varies between UniFi OS versions.
 
 ## What the tabs show
 
@@ -61,13 +188,21 @@ Extracted bundles and cached analysis live in `data/`. Analysis is cached per bu
 - **Network devices**: what the machines behind the gateway were connecting to at
   the moment of capture, named from the lease table, with unusual destinations
   flagged.
-- **History**: how far back each log actually reaches. Start here when an analysis
-  looks empty, to tell "nothing happened" from "nobody was writing it down".
+- **History**: how far back each log actually reaches.
 - **Privacy**: what personal data and secrets the file would carry if you sent it
   to Ubiquiti or posted it. Runs on demand, and every value is masked. Also
   produces a cleaned copy of the file that is safe to send.
 - **Ramoops**: the kernel console preserved across the last restart.
 - **Browse files**: any file in the bundle, decompressed, with search.
+
+## What it is not
+
+- Not official, and not affiliated with Ubiquiti.
+- Not a monitor. It reads a file after the fact; it does not watch your network.
+- Not a security scanner. It points out things worth a look and explains why, and
+  an unfamiliar process is far more often a firmware change than an intrusion.
+- Not a substitute for your own judgement. Findings are evidence and reasoning,
+  meant to be checked.
 
 ## How long analysis takes, and what decides that
 
@@ -309,6 +444,7 @@ analyzer/
   logscan.py    failure-signature scan with noise filtering
   findings.py   ranked diagnostics
 static/         single-page UI (vendored Chart.js, no CDN)
+docs/           screenshots used by this README
 tests/          synthetic-compromise tests for the process audit
 ```
 

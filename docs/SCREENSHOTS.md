@@ -1,5 +1,7 @@
 # How the screenshots were made
 
+They are the images embedded in the top-level README.
+
 They must never show real network data, so they are taken from a support file
 that has been run through the tool's own cleaning step first. Every address,
 device name, hardware address and domain in them is a stand-in.
