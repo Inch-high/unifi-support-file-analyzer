@@ -191,7 +191,8 @@ def api_files(bid: str):
     out = []
     for p in sorted(root.rglob("*")):
         if p.is_file():
-            out.append({"path": str(p.relative_to(root)), "size": p.stat().st_size})
+            out.append({"path": p.relative_to(root).as_posix(),
+                        "size": p.stat().st_size})
     return out
 
 

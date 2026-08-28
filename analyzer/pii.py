@@ -332,7 +332,9 @@ def scan_bundle(root: Path, progress=None, reveal=False, workers=None):
     for path in sorted(root.rglob("*")):
         if not path.is_file():
             continue
-        rel = str(path.relative_to(root))
+        # as_posix, not str: on Windows str gives backslashes, which both
+        # display wrongly and defeat the "/mem_snapshot/" skip checks below
+        rel = path.relative_to(root).as_posix()
         if path.name.endswith(SKIP_SUFFIXES) or any(s in "/" + rel for s in SKIP_PARTS):
             skipped += 1
             continue

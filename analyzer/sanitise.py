@@ -423,7 +423,9 @@ def sanitise_bundle(root: Path, out_dir: Path, keep=(), workers=None):
     keep = tuple(keep)
 
     files = [p for p in sorted(root.rglob("*")) if p.is_file()]
-    rels = [str(p.relative_to(root)) for p in files]
+    # forward slashes on every platform, so the skip lists and the report
+    # agree regardless of where this runs
+    rels = [p.relative_to(root).as_posix() for p in files]
 
     # Pass one: learn every distinct value, so stand-ins can be allocated once.
     collected = {"public_ip": set(), "mac_address": set(), "email": set(),
