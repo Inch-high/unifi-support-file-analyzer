@@ -38,6 +38,14 @@ jobs:
       - name: Check every module imports
         run: python -c "import analyzer.app; print('imports ok')"
 
+      # Everything else here imports the package directly, so nothing ever
+      # ran the program the way a person does. That is how a launcher that
+      # could not enter its own virtual environment on macOS and Linux
+      # shipped: the suites all passed on the three platforms it was broken
+      # on. This starts it exactly as the README says to.
+      - name: Start the way the README says to
+        run: python run.py --check
+
       - name: Archive extraction and path containment
         run: python tests/test_bundle.py
 
