@@ -10,6 +10,11 @@ It runs entirely on your own machine. There is no cloud service and no
 telemetry. It reads files and never changes your device. It is not an official
 Ubiquiti tool and has no connection to Ubiquiti.
 
+**[Install and run it](#installing-and-running-it)** — with Python, or with
+Docker. The rest of this page is what it shows you and how to read it:
+[the screenshots](#what-it-looks-like), [what each tab
+means](#what-the-tabs-show), [reading it correctly](#reading-it-correctly).
+
 > ### About how this was built
 >
 > This tool was written by prompting an AI, in conversation, rather than typed
