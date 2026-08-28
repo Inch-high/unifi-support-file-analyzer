@@ -1,0 +1,30 @@
+# The build context is sent to the daemon before anything is built, so this is
+# mostly about not shipping a few hundred megabytes of somebody's network data
+# to it. The Dockerfile copies what it needs by name; nothing here is required.
+
+# Support files and anything extracted from them. First, and emphatically.
+data/
+*.tgz
+*.tar.gz
+support-*/
+import/
+
+.git/
+.github/
+.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+.DS_Store
+.claude/
+.env
+
+docs/
+tests/
+README.md
+LICENSE
+run.sh
+run.bat
+docker-compose.yml
+.dockerignore
+Dockerfile

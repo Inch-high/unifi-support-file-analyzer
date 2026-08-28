@@ -5,7 +5,12 @@ import re
 import tarfile
 from pathlib import Path
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+# Extracted bundles, uploads and cleaned exports. The default sits next to the
+# code, which is what a local run wants. ANALYZER_DATA_DIR moves it, which is
+# what a container wants: the image itself is disposable and everything worth
+# keeping - or worth deliberately throwing away - belongs on a mounted volume.
+DATA_DIR = Path(os.environ.get("ANALYZER_DATA_DIR")
+                or Path(__file__).resolve().parent.parent / "data").resolve()
 BUNDLES_DIR = DATA_DIR / "bundles"
 UPLOADS_DIR = DATA_DIR / "uploads"
 EXPORTS_DIR = DATA_DIR / "exports"

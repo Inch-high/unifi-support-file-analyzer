@@ -153,6 +153,61 @@ On Fedora: `sudo dnf install python3 git`. On Arch: `sudo pacman -S python git`.
 
 </details>
 
+<details>
+<summary><b>Docker</b></summary>
+
+Nothing to install but Docker itself, no Python on the machine, and nothing left
+behind when you remove the container. Images are published for x86-64 and ARM,
+so a NAS or a Raspberry Pi will run it.
+
+```bash
+git clone https://github.com/Inch-high/unifi-support-file-analyzer.git
+cd unifi-support-file-analyzer
+cp .env.example .env
+docker compose up -d
+```
+
+Open <http://127.0.0.1:8077>. Everything worth changing is in `.env`:
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| `ANALYZER_BIND_IP` | `127.0.0.1` | Which address on your machine answers. `0.0.0.0` puts it on the LAN; a single address such as `192.168.1.10` puts it on one interface only. |
+| `ANALYZER_PORT` | `8077` | The port on your machine. Inside the container it is always 8077. |
+| `ANALYZER_STORAGE` | `analyzer-data` | Where extracted files and cached analysis are kept. A Docker named volume by default; give a path such as `./data` to keep them somewhere you can open. |
+| `ANALYZER_CLEAR_ON_START` | `true` | Empty that storage every time the container starts. |
+| `ANALYZER_IMPORT_PATH` | `./import` | Support files here are imported at start-up. Mounted read-only, so your originals are never touched. |
+| `PUID` / `PGID` | `1000` | Who owns what is written to storage, when storage is a directory on your machine. `id -u` and `id -g`. |
+
+The address default keeps the analyzer on the machine running it. There is no
+login, and what it puts on screen is your network's addresses, your device
+names, and in the Privacy tab your secrets — so reaching it from elsewhere on
+the LAN should be a decision you make rather than one you inherit.
+
+Clearing storage on start is on for the same reason. A support file is
+something you read once; a container that quietly accumulates them becomes a
+copy of your network sitting on a disk nobody remembers filling. Set
+`ANALYZER_CLEAR_ON_START=false` if you are comparing captures across days and
+would rather not analyse them again each time — the first pass over a large
+file takes minutes, and the cache is what makes every later look instant.
+
+To get a support file in, drag it onto the page, or put it in `import/`:
+
+```bash
+cp ~/Downloads/support-XXXX-1234567890.tgz import/
+docker compose restart
+```
+
+Without cloning anything, using the published image:
+
+```bash
+docker run -d --name unifi-analyzer \
+  -p 127.0.0.1:8077:8077 \
+  -v analyzer-data:/data \
+  ghcr.io/inch-high/unifi-support-file-analyzer:latest
+```
+
+</details>
+
 Your browser opens at <http://127.0.0.1:8077>. Drag a support file onto the
 page, or put it in the project folder before starting and it will be picked up.
 You can also pass one directly:
@@ -162,7 +217,8 @@ python run.py ~/Downloads/support-XXXX-1234567890.tgz
 ```
 
 Extracted files and cached analysis live in `data/`, which is excluded from git.
-Analysis is cached per support file; "Re-analyze" forces a fresh pass.
+Set `ANALYZER_DATA_DIR` to keep them somewhere else. Analysis is cached per
+support file; "Re-analyze" forces a fresh pass.
 
 ### Getting a support file from your console
 
@@ -446,6 +502,10 @@ analyzer/
   logscan.py    failure-signature scan with noise filtering
   findings.py   ranked diagnostics
 static/         single-page UI (vendored Chart.js, no CDN)
+docker/
+  entrypoint.sh  prepares storage, drops privileges, starts the server
+  import_dir.py  extracts whatever is waiting in the import directory
+  smoke-test.sh  runs the built image and checks it actually works
 docs/           screenshots used by this README
 tests/          synthetic-compromise tests for the process audit
 ```
