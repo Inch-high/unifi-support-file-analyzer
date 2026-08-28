@@ -89,8 +89,10 @@ cleaned copy you can actually share.
 
 How far back each log actually goes. Start here when an analysis looks empty,
 because "nothing happened" and "nobody was writing it down" look identical
-otherwise. Note the memory snapshots cover three days while the kernel log
-covers eight months.
+otherwise. Each bar sits on a shared timeline rather than being measured from
+the left, so where it starts is when that log's coverage begins. They all finish
+at the right-hand edge because every log runs up to the moment of capture. Note
+the memory snapshots cover three days while the kernel log covers eight months.
 
 ![The History tab showing how far back each log reaches](docs/screenshots/history.png)
 

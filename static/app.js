@@ -885,6 +885,33 @@ function viewHistory() {
       `range, so a short bar means questions about earlier dates cannot be answered ` +
       `from that source at all, not that nothing happened.`));
 
+  // A shared scale, drawn once above the bars. Without it every short bar sits
+  // against the right edge with nothing to measure against, and reads as a
+  // right-aligned progress bar rather than as a position in time.
+  const axisDate = f => {
+    const d = new Date(t0 + span * f);
+    return d.toISOString().slice(0, 10);
+  };
+  const TICKS = [0, 0.25, 0.5, 0.75, 1];
+  const gridline =
+    'background-image:repeating-linear-gradient(to right,' +
+    'var(--border) 0 1px, transparent 1px 25%);';
+
+  const axis = el('div', { style: 'margin:4px 0 14px' },
+    el('div', { style: 'position:relative;height:7px' },
+      ...TICKS.map(f => el('div', {
+        style: `position:absolute;left:${f * 100}%;top:0;bottom:0;width:1px;` +
+          'background:var(--border)',
+      }))),
+    el('div', { style: 'position:relative;height:16px' },
+      ...TICKS.map((f, i) => el('div', {
+        className: 'small muted',
+        style: `position:absolute;left:${f * 100}%;white-space:nowrap;` +
+          (i === 0 ? '' : i === TICKS.length - 1
+            ? 'transform:translateX(-100%)' : 'transform:translateX(-50%)'),
+        textContent: axisDate(f),
+      }))));
+
   const bars = dated.map(s => {
     const a = (Date.parse(s.from) - t0) / span * 100;
     const w = Math.max((Date.parse(s.to) - Date.parse(s.from)) / span * 100, 0.6);
@@ -892,7 +919,12 @@ function viewHistory() {
       el('div', { className: 'small', style: 'display:flex;justify-content:space-between;gap:10px' },
         el('span', {}, s.label),
         el('span', { className: 'muted' }, `${s.days} d · ${fmtDate(s.from)} → ${fmtDate(s.to)}`)),
-      el('div', { style: 'position:relative;height:9px;background:var(--panel-2);border:1px solid var(--border);border-radius:5px;margin-top:4px' },
+      el('div', {
+        title: `${s.label}: ${fmtDate(s.from)} to ${fmtDate(s.to)}`,
+        style: 'position:relative;height:9px;background:var(--panel-2);' +
+          'border:1px solid var(--border);border-radius:5px;margin-top:4px;' +
+          gridline,
+      },
         el('div', {
           style: `position:absolute;left:${a}%;width:${w}%;top:0;bottom:0;` +
             `background:${s.days >= 60 ? '#3fbf8f' : s.days >= 14 ? '#f0b357' : '#e2574c'};` +
@@ -911,7 +943,13 @@ function viewHistory() {
 
   render(intro,
     el('div', { className: 'card', style: 'margin-top:15px' },
-      el('h3', {}, 'Retention by source'), ...bars),
+      el('h3', {}, 'Retention by source'),
+      el('p', { className: 'small muted', style: 'margin:0 0 4px' },
+        'Each bar is placed on the timeline below, not measured from the left. ' +
+        'Every log runs up to the moment the support file was made, so they all ' +
+        'finish at the right-hand edge and a short bar means the log only ' +
+        'reaches back a little way.'),
+      axis, ...bars),
     el('div', { className: 'table-wrap', style: 'margin-top:15px' }, el('table', {},
       el('thead', {}, el('tr', {}, ...['Source', 'Path', 'Files', 'From', 'To', 'Span', 'Notes']
         .map(h => el('th', {}, h)))),
