@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UniFi Support File Analyzer</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230559c9'/%3E%3Cpath d='M8 20h3l3-9 4 13 3-8h3' fill='none' stroke='white' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header>
+  <h1>UniFi Support File Analyzer</h1>
+  <span class="sub" id="devsub"></span>
+  <span class="spacer"></span>
+  <select id="bundleSel" title="Loaded support files"></select>
+  <button id="reanalyze" title="Re-run analysis, ignoring cache">Re-analyze</button>
+  <button class="primary" id="addBtn">Add file</button>
+  <input type="file" id="fileInput" accept=".tgz,.tar.gz,.tar" hidden>
+</header>
+
+<nav id="tabs"></nav>
+<main id="main"></main>
+
+<script src="/static/chart.umd.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

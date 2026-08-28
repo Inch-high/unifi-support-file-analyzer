@@ -1,0 +1,14 @@
+# Anything holding your own network's data must never be committed.
+# Extracted files, cached analysis and cleaned exports:
+data/
+# Support files themselves:
+*.tgz
+# A support file that was extracted in place next to the code:
+support-*/
+# The published screenshots are made from cleaned data and are kept:
+!docs/screenshots/
+
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
