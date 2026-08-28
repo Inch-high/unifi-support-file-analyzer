@@ -196,7 +196,7 @@ def parse_netstat(root: Path):
     if not p.exists():
         return []
     out = []
-    for line in p.read_text(errors="replace").splitlines():
+    for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
         parts = line.split()
         if len(parts) < 5 or parts[0] not in ("tcp", "tcp6", "udp", "udp6"):
             continue
@@ -216,7 +216,7 @@ def parse_ps(root: Path):
     if not p.exists():
         return {}
     rows = {}
-    for line in p.read_text(errors="replace").splitlines()[1:]:
+    for line in p.read_text(encoding="utf-8", errors="replace").splitlines()[1:]:
         parts = line.split(None, 10)
         if len(parts) < 11 or not parts[1].isdigit():
             continue

@@ -64,7 +64,7 @@ def _first_last(path: Path):
     if not path.name.endswith((".gz", ".zst")):
         try:
             size = path.stat().st_size
-            with path.open("r", errors="replace") as fh:
+            with path.open("r", encoding="utf-8", errors="replace") as fh:
                 head = [fh.readline() for _ in range(EDGE_LINES)]
                 if size > TAIL_BYTES:
                     fh.seek(size - TAIL_BYTES)

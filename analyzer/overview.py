@@ -5,7 +5,7 @@ from pathlib import Path
 
 def _read(p: Path, limit=200_000):
     try:
-        return p.read_text(errors="replace")[:limit]
+        return p.read_text(encoding="utf-8", errors="replace")[:limit]
     except OSError:
         return ""
 

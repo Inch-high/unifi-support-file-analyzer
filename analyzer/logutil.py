@@ -32,17 +32,26 @@ TS_RE = re.compile(
 
 
 def open_log(path: Path):
-    """Yield text lines from a log file, transparently decompressing."""
+    """Yield text lines from a log file, transparently decompressing.
+
+    The encoding is stated rather than left to the platform. A UniFi device
+    writes UTF-8, but Python picks the locale encoding when none is given,
+    which is UTF-8 on Linux and macOS and cp1252 on a typical Windows box.
+    Leaving it implicit meant the same log read one way through gzip (whose
+    bytes.decode defaults to UTF-8) and another way as a plain file, so a
+    rotation and the live log it came from disagreed about their own contents.
+    """
     name = path.name
     if name.endswith(".gz"):
-        return io.TextIOWrapper(gzip.open(path, "rb"), errors="replace")
+        return io.TextIOWrapper(gzip.open(path, "rb"),
+                                encoding="utf-8", errors="replace")
     if name.endswith(".zst"):
         if zstandard is None:
             raise RuntimeError("zstandard module not available")
         fh = path.open("rb")
         stream = zstandard.ZstdDecompressor().stream_reader(fh)
-        return io.TextIOWrapper(stream, errors="replace")
-    return path.open("r", errors="replace")
+        return io.TextIOWrapper(stream, encoding="utf-8", errors="replace")
+    return path.open("r", encoding="utf-8", errors="replace")
 
 
 def parse_ts(line: str):

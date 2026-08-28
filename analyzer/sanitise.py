@@ -170,30 +170,44 @@ def _is_text_file(path: Path, rel: str):
 
 
 def _read_any(path: Path):
-    """Text of a file, decompressing .gz and .zst."""
+    """Text of a file, decompressing .gz and .zst.
+
+    UTF-8 throughout, stated explicitly. bytes.decode already defaults to it,
+    but read_text defaults to the platform encoding, so the two branches below
+    used to disagree with each other on Windows.
+    """
     if path.name.endswith(".gz"):
         with gzip.open(path, "rb") as fh:
-            return fh.read().decode(errors="replace")
+            return fh.read().decode("utf-8", errors="replace")
     if path.name.endswith(".zst"):
         if zstandard is None:
             raise RuntimeError("zstandard is not installed")
         with path.open("rb") as fh:
             return zstandard.ZstdDecompressor().stream_reader(fh).read() \
-                .decode(errors="replace")
-    return path.read_text(errors="replace")
+                .decode("utf-8", errors="replace")
+    return path.read_text(encoding="utf-8", errors="replace")
 
 
 def _write_any(path: Path, text: str):
     """Write text back in the same form the original used, so the cleaned
-    bundle still looks like a support file to whatever reads it next."""
+    bundle still looks like a support file to whatever reads it next.
+
+    Both halves of the round trip have to name the same encoding. Without it
+    this raised UnicodeEncodeError on Windows and lost the export: reading
+    picked up cp1252, any byte undefined in that encoding (0x81 and 0x90 among
+    them, ordinary enough in a kernel hexdump) became U+FFFD, and cp1252 has
+    no way to write U+FFFD back out. errors="replace" covers the residue, so
+    an unwritable character costs one character rather than the whole file.
+    """
     if path.name.endswith(".gz"):
         with gzip.open(path, "wb") as fh:
-            fh.write(text.encode())
+            fh.write(text.encode("utf-8", errors="replace"))
         return
     if path.name.endswith(".zst"):
-        path.write_bytes(zstandard.ZstdCompressor().compress(text.encode()))
+        path.write_bytes(zstandard.ZstdCompressor()
+                         .compress(text.encode("utf-8", errors="replace")))
         return
-    path.write_text(text)
+    path.write_text(text, encoding="utf-8", errors="replace")
 
 
 def _collect_one(task):
@@ -389,7 +403,7 @@ def collect_hostnames(root: Path):
         if not p.is_file():
             continue
         try:
-            text = p.read_text(errors="replace")
+            text = p.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
         for rx in (LEASE_NAME_RE, DNSCACHE_NAME_RE):
