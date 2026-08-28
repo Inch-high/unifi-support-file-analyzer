@@ -1,0 +1,50 @@
+# Copy .env.example to .env to change any of this. Compose reads that file
+# automatically, so nothing in here needs editing.
+
+services:
+  analyzer:
+    image: ghcr.io/inch-high/unifi-support-file-analyzer:latest
+    # Present so `docker compose up --build` builds from this checkout instead
+    # of pulling. Without the flag the published image is used.
+    build: .
+    container_name: unifi-support-file-analyzer
+    restart: unless-stopped
+
+    ports:
+      # host address : host port : port inside the container. The default keeps
+      # the analyzer on this machine: it has no login and it reads a file full
+      # of your network's addresses, names and secrets. ANALYZER_BIND_IP=0.0.0.0
+      # opens it to the whole LAN, and a single address such as 192.168.1.10
+      # opens it on that interface only.
+      - "${ANALYZER_BIND_IP:-127.0.0.1}:${ANALYZER_PORT:-8077}:8077"
+
+    volumes:
+      # Extracted support files, cached analysis and cleaned exports. A named
+      # volume by default; set ANALYZER_STORAGE to a path such as ./data to
+      # keep them somewhere you can open.
+      - "${ANALYZER_STORAGE:-analyzer-data}:/data"
+      # Support files put here are imported when the container starts. Mounted
+      # read-only: the analyzer extracts copies and never writes back.
+      - "${ANALYZER_IMPORT_PATH:-./import}:/import:ro"
+
+    environment:
+      # Throw away everything in storage each time the container starts. On by
+      # default - a support file has no reason to outlive the session that
+      # needed it. Set to false to keep bundles and their analysis across
+      # restarts.
+      ANALYZER_CLEAR_ON_START: "${ANALYZER_CLEAR_ON_START:-true}"
+      # Who owns what is written to storage, which matters when storage is a
+      # directory on this machine. `id -u` and `id -g`.
+      PUID: "${PUID:-1000}"
+      PGID: "${PGID:-1000}"
+
+    # Analysis of a large support file is CPU-bound and parallel. Uncomment to
+    # stop it taking the whole machine.
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: "4"
+    #       memory: 4g
+
+volumes:
+  analyzer-data:

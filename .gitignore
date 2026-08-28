@@ -5,6 +5,13 @@ data/
 *.tgz
 # A support file that was extracted in place next to the code:
 support-*/
+# Support files staged for the container to import at start-up. The directory
+# itself is kept, so a fresh clone has somewhere to put them and Docker does
+# not have to create it:
+import/*
+!import/.gitkeep
+# Your own container settings, which name paths on your machine:
+.env
 # The published screenshots are made from cleaned data and are kept:
 !docs/screenshots/
 
