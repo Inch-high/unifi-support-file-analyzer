@@ -458,3 +458,14 @@ pattern honest, `thermal` matches the harmless `Thermal Sensor Loaded` printed a
 boot, and `watchdog` matches the `watchdog did not stop!` of every clean shutdown. Add
 an entry to `GROUP_RES` if a finding should report *which* interface or service was
 involved.
+
+## License
+
+[MIT](LICENSE). Use it, change it, build on it, sell it if you like. The one
+condition is credit: keep the copyright notice and the licence text with any
+copy or substantial portion you pass on.
+
+It is not an official Ubiquiti tool and has no connection to Ubiquiti. "UniFi"
+and "Ubiquiti" are trademarks of Ubiquiti Inc., used here only to say what the
+tool reads. As the licence says, it comes with no warranty, so check anything
+that matters before acting on it.
