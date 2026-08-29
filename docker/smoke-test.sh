@@ -76,6 +76,21 @@ start true
 wait_ready
 pass "server answers on http://127.0.0.1:${PORT}"
 
+version_json="$(curl -fsS "http://127.0.0.1:${PORT}/api/version")" \
+    || fail "/api/version did not answer"
+pass "reports version $(printf '%s' "$version_json" \
+    | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')"
+
+# The firmware manifest is a data file rather than code, which makes it exactly
+# the sort of thing an ignore rule drops from the image while everything still
+# builds and starts. It nearly was: .gitignore's rule for the bundle workspace
+# matched analyzer/data/ too. Without the manifest the process audit compares
+# against nothing and reports every process on the device as not shipped, so
+# its absence has to be a failure here rather than a surprise later.
+printf '%s' "$version_json" | grep -q '"available":true' \
+    || fail "the firmware manifest is missing from the image"
+pass "firmware manifest shipped in the image"
+
 bundles | grep -q "$BUNDLE" || fail "the file in /import was not imported"
 pass "support file in /import was imported"
 

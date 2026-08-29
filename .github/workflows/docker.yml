@@ -38,6 +38,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # A release tag that disagrees with the version in the code would publish
+      # an image whose name and contents contradict each other, and the name is
+      # what anyone pinning it would trust. Refused before anything is built.
+      - name: The tag and the code must agree
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          code=$(python3 -c "import analyzer; print(analyzer.__version__)")
+          tag="${GITHUB_REF_NAME#v}"
+          echo "tag says $tag, analyzer/__init__.py says $code"
+          if [ "$tag" != "$code" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match __version__ $code"
+            exit 1
+          fi
+
       # Emulation, so the arm64 image can be built on an x86 runner.
       - uses: docker/setup-qemu-action@v3
 

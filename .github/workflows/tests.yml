@@ -42,7 +42,7 @@ jobs:
         run: python -m pip install --quiet --upgrade pip -r requirements.txt
 
       - name: Check every module imports
-        run: python -c "import analyzer.app; print('imports ok')"
+        run: python -c "import analyzer, analyzer.app; print('imports ok', analyzer.__version__)"
 
       # Everything else here imports the package directly, so nothing ever
       # ran the program the way a person does. That is how a launcher that
