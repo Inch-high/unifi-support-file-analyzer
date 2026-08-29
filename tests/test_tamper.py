@@ -43,8 +43,13 @@ def gap(frm, to):
                         - datetime.fromisoformat(frm)).total_seconds()}
 
 
-def run(records, boots=()):
-    return tamper.analyze_integrity({"integrity": records}, list(boots))
+def sync(at, line="systemd[1]: Time has been changed"):
+    return {"at": at, "line": line}
+
+
+def run(records, boots=(), syncs=()):
+    return tamper.analyze_integrity(
+        {"integrity": records, "clock_syncs": list(syncs)}, list(boots))
 
 
 def kinds(result):
@@ -105,6 +110,43 @@ def main():
     r = run([rec("iso.log", "2026-07-01T00:00:00+00:00", "2026-07-20T00:00:00+00:00",
                  backwards=[jump("2026-07-05T12:00:00", "2026-07-05T11:00:00")])])
     check("isolated backwards jump flagged", "out-of-order timestamps" in kinds(r))
+
+    # A clock being set makes exactly the shape this module hunts for: a big
+    # backwards step with no reboot near it. The device says so in the log, and
+    # a reader who opens the evidence sees the sync sitting right there, so the
+    # tool should not have to be told twice.
+    print("\nA corrected clock is distinguished from an edited log:")
+    jumped = [rec("ntp.log", "2026-07-01T00:00:00+00:00", "2026-07-20T00:00:00+00:00",
+                  backwards=[jump("2026-07-05T12:00:00", "2026-07-05T11:00:00")])]
+    r = run(jumped, syncs=[sync("2026-07-05T11:00:04")])
+    check("a jump at a clock sync is not called out-of-order",
+          "out-of-order timestamps" not in kinds(r))
+    check("but it is still reported", "clock correction" in kinds(r))
+    check("as information rather than a suspicion",
+          all(i["severity"] == "info" for i in r["issues"]
+              if i["kind"] == "clock correction"))
+    check("with the sync line as evidence",
+          any("Time has been changed" in (i.get("evidence") or "")
+              for i in r["issues"] if i["kind"] == "clock correction"))
+
+    r = run(jumped, syncs=[sync("2026-07-05T02:00:00")])
+    check("a sync hours away explains nothing",
+          "out-of-order timestamps" in kinds(r))
+    r = run(jumped, syncs=[sync("not a timestamp")])
+    check("an unparseable sync time is ignored rather than crashing",
+          "out-of-order timestamps" in kinds(r))
+
+    # ntpd and chrony word it differently; all of them have to register.
+    for line in ("ntpd[1]: time reset -3600.000000 s",
+                 "ntpd[1]: step time server 10.0.0.1 offset -3600.0 sec",
+                 "chronyd[1]: System clock wrong by -3600.0 seconds",
+                 "systemd-timesyncd[1]: Synchronized to time server 10.0.0.1:123"):
+        from analyzer.logscan import CLOCK_SYNC_RE
+        check(f"recognised: {line.split(':')[1].strip()[:34]}",
+              bool(CLOCK_SYNC_RE.search(line)))
+    from analyzer.logscan import CLOCK_SYNC_RE as _CS
+    check("routine timesyncd chatter is not treated as a correction",
+          not _CS.search("systemd-timesyncd[1]: Network configuration changed"))
 
     r = run([rec("busy.log", "2026-07-01T00:00:00+00:00", "2026-07-11T00:00:00+00:00",
                  lines=50000,

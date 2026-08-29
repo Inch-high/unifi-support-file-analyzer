@@ -109,6 +109,16 @@ function drawTabs() {
   }));
 }
 
+// A privacy scan or a cleaned copy takes minutes to come back, and render()
+// replaces #main with whatever it is given regardless of what is in there. The
+// tabs are buttons rather than a container that owns its content, so without
+// this check a result painted itself over whichever tab had been opened while
+// it ran, underneath that tab's still-underlined heading. The result is held
+// in state either way, so going back to the tab shows it.
+function repaintIf(tab, view) {
+  if (state.tab === tab) view();
+}
+
 function show(tab) {
   state.tab = tab;
   writeHash();
@@ -1032,7 +1042,7 @@ function sanitiseBlock() {
         } catch (err) {
           state.sanitise = { error: err.message };
         }
-        viewPrivacy();
+        repaintIf('privacy', viewPrivacy);
       },
     })));
 
@@ -1094,27 +1104,34 @@ async function viewPrivacy() {
       `It reads every text file in the bundle, so it runs only when you ask.`));
 
   if (!p) {
-    render(intro, el('div', { className: 'card', style: 'margin-top:15px' },
-      el('button', {
-        className: 'primary', textContent: 'Run privacy scan',
-        onclick: async e => {
-          e.target.disabled = true;
-          render(intro, el('div', { className: 'card' },
-            el('span', { className: 'spin' }),
-            ' Scanning every file in the bundle, this takes a couple of minutes.'));
-          try {
-            state.pii = await api(`/api/bundle/${encodeURIComponent(state.bid)}/pii` +
-              `?reveal=${state.piiReveal ? 'true' : 'false'}`);
-          } catch (err) {
-            render(intro, el('div', { className: 'finding critical' },
-              el('h4', {}, 'Scan failed'), el('p', {}, err.message)));
-            return;
-          }
-          viewPrivacy();
-        },
-      }),
-      el('span', { className: 'small muted', style: 'margin-left:11px' },
-        'Results are cached per bundle.')));
+    // A failure is kept in state rather than painted straight out, for the
+    // same reason the success is: by the time it arrives the user may be
+    // reading another tab, and it should be waiting here when they return.
+    const failed = state.piiError
+      ? [el('div', { className: 'finding critical', style: 'margin-top:15px' },
+          el('h4', {}, 'Scan failed'), el('p', {}, state.piiError))]
+      : [];
+    render(intro, ...failed,
+      el('div', { className: 'card', style: 'margin-top:15px' },
+        el('button', {
+          className: 'primary', textContent: 'Run privacy scan',
+          onclick: async e => {
+            e.target.disabled = true;
+            state.piiError = null;
+            render(intro, el('div', { className: 'card' },
+              el('span', { className: 'spin' }),
+              ' Scanning every file in the bundle, this takes a couple of minutes.'));
+            try {
+              state.pii = await api(`/api/bundle/${encodeURIComponent(state.bid)}/pii` +
+                `?reveal=${state.piiReveal ? 'true' : 'false'}`);
+            } catch (err) {
+              state.piiError = err.message;
+            }
+            repaintIf('privacy', viewPrivacy);
+          },
+        }),
+        el('span', { className: 'small muted', style: 'margin-left:11px' },
+          'Results are cached per bundle.')));
     return;
   }
 

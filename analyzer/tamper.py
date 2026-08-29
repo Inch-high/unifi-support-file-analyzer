@@ -37,6 +37,9 @@ ROUTINE_REORDER_COUNT = 2
 ROUTINE_GAP_COUNT = 2
 # Reboots legitimately reorder and re-stamp log lines around them.
 BOOT_WINDOW = timedelta(minutes=20)
+# So does the clock being set. The correction is logged as it happens, so this
+# is tighter than the reboot window: a sync an hour away explains nothing.
+CLOCK_WINDOW = timedelta(minutes=20)
 # A log must be at least this busy for silence to be meaningful.
 DENSE_LINES_PER_DAY = 500
 # Rotations abut within a minute normally; this much daylight is a real break.
@@ -72,6 +75,26 @@ def _near_boot(when, boots):
                for b in boots)
 
 
+def _clock_sync_near(syncs, *whens):
+    """The clock correction that explains a jump at these instants, if any.
+
+    A clock being set produces exactly the shape this module looks for: a
+    sizeable backwards step with no reboot near it. Told apart only by the
+    device having said so, in whichever log carried the message.
+    """
+    for when in whens:
+        if when is None:
+            continue
+        w = _naive(when)
+        for s in syncs:
+            at = _dt(s.get("at"))
+            if at is None:
+                continue
+            if abs((w - _naive(at)).total_seconds()) <= CLOCK_WINDOW.total_seconds():
+                return s
+    return None
+
+
 def _rotation_index(filename, base):
     m = ROT_NUM_RE.search(filename)
     if m:
@@ -84,6 +107,7 @@ def _rotation_index(filename, base):
 def analyze_integrity(logscan_result, boot_times=None, coverage=None):
     boots = sorted(boot_times or [])
     files = logscan_result.get("integrity") or []
+    clock_syncs = logscan_result.get("clock_syncs") or []
     issues = []
     checked = 0
 
@@ -115,6 +139,27 @@ def analyze_integrity(logscan_result, boot_times=None, coverage=None):
                 continue
             delta = (_naive(a) - _naive(z)).total_seconds()
             if delta < BACKWARDS_MIN_SECONDS or _near_boot(a, boots):
+                continue
+            sync = _clock_sync_near(clock_syncs, a, z)
+            if sync:
+                # Still reported, because a step in the record is worth seeing
+                # and the evidence is what makes it readable, but as an
+                # observation rather than a suspicion: the device said it was
+                # setting its clock at this moment.
+                issues.append({
+                    "severity": "info",
+                    "file": rec["file"],
+                    "kind": "clock correction",
+                    "title": f"Timestamps step {int(delta)}s backwards where the "
+                             "clock was corrected",
+                    "detail": f"The line stamped {b['to']} follows one stamped "
+                              f"{b['from']}, which on its own is the shape of an "
+                              "edited log. A time synchronisation was recorded "
+                              f"within {int(CLOCK_WINDOW.total_seconds() / 60)} "
+                              "minutes of it, which accounts for the step: the "
+                              "clock moved, the log did not.",
+                    "evidence": f"{b['line']}\n{sync['line']}",
+                })
                 continue
             issues.append({
                 "severity": "major",

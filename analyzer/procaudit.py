@@ -99,6 +99,28 @@ KNOWN_PROCESSES = {
     "ubnt-tools", "uname", "sync", "touch", "sort", "head", "tail", "wc", "xargs",
 }
 
+# UniFi ships a different set of daemons on every platform - unifi-directory
+# and udr-ui on a Dream Router, others on a Cloud Gateway - so a list of
+# literal names can only ever describe the hardware it was written against.
+# Reported as false alarms by someone running a device this was not: a
+# perfectly ordinary UniFi service, flagged major purely because it listened
+# on a socket and its name had never been seen here.
+#
+# The vendor's naming conventions are recognised as well, but only for a
+# binary that shipped in the firmware, which is what the path check below
+# establishes. That distinction is the whole safeguard: an add-on cannot get
+# into a system directory on a read-only squashfs, so it lands somewhere
+# writable and trips the path rule at critical no matter what it is named.
+# A name alone never grants this.
+VENDOR_NAME_RE = re.compile(
+    r"^(?:unifi|uos|ubios|ubnt|udapi|ulp|udm|udr|ucg|uxg|uap|usw)[-_]?[a-z0-9]",
+    re.I)
+
+
+def _vendor_named(name, in_system):
+    """Whether this looks like vendor software that came with the firmware."""
+    return bool(name) and in_system and bool(VENDOR_NAME_RE.match(name))
+
 # Command lines worth a human look wherever they appear.
 SUSPICIOUS_CMDLINE = [
     (r"\b(?:curl|wget)\b[^|]*\|\s*(?:ba)?sh", "downloads and pipes straight to a shell"),
@@ -335,7 +357,9 @@ def audit_processes(root: Path, offsets=None, boot_times=None):
         deleted = "(deleted)" in exe
         in_writable = any(exe.startswith(pfx) for pfx in WRITABLE_EXEC_PREFIXES)
         in_system = any(exe.startswith(pfx) for pfx in SYSTEM_EXEC_PREFIXES)
-        known = base in KNOWN_PROCESSES or comm in KNOWN_PROCESSES
+        known = (base in KNOWN_PROCESSES or comm in KNOWN_PROCESSES
+                 or _vendor_named(base, in_system)
+                 or _vendor_named(comm, in_system))
 
         # A fresh pid in every sighting means a short-lived command re-run on a
         # schedule, not something resident. Snapshots catch such processes
