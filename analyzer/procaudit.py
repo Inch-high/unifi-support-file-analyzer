@@ -99,6 +99,46 @@ KNOWN_PROCESSES = {
     "ubnt-tools", "uname", "sync", "touch", "sort", "head", "tail", "wc", "xargs",
 }
 
+# UniFi ships a different set of daemons on every platform - unifi-directory
+# and udr-ui on a Dream Router, others on a Cloud Gateway - so a list of
+# literal names can only ever describe the hardware it was written against.
+# Reported as false alarms by someone running a device this was not: a
+# perfectly ordinary UniFi service, flagged major purely because it listened
+# on a socket and its name had never been seen here.
+#
+# The vendor's naming conventions are recognised as well, but only for a
+# binary that shipped in the firmware, which is what the path check below
+# establishes. That distinction is the whole safeguard: an add-on cannot get
+# into a system directory on a read-only squashfs, so it lands somewhere
+# writable and trips the path rule at critical no matter what it is named.
+# A name alone never grants this.
+VENDOR_NAME_RE = re.compile(
+    r"^(?:unifi|uos|ubios|ubnt|udapi|ulp|udm|udr|ucg|uxg|uap|usw)[-_]?[a-z0-9]",
+    re.I)
+
+# Which system paths that safeguard can actually stand on. SYSTEM_EXEC_PREFIXES
+# answers a laxer question - "is this one of the directories stock firmware
+# runs from" - and includes /opt and /usr/share, which are exactly where
+# third-party software installs itself by convention. That is harmless for the
+# path flag, whose absence merely says nothing, but it cannot carry a *name*
+# allowlist: an add-on under /opt called unifi-anything would otherwise be
+# waved through on its name alone, which is the one thing the paragraph above
+# promises never happens. Only directories that are part of the read-only image
+# count here.
+FIRMWARE_EXEC_PREFIXES = (
+    "/usr/bin/", "/usr/sbin/", "/usr/lib/", "/usr/libexec/",
+    "/bin/", "/sbin/", "/lib/",
+)
+
+
+def _vendor_named(name, exe):
+    """Whether this looks like vendor software that came with the firmware."""
+    if not name or not exe:
+        return False
+    if not any(exe.startswith(pfx) for pfx in FIRMWARE_EXEC_PREFIXES):
+        return False
+    return bool(VENDOR_NAME_RE.match(name))
+
 # Command lines worth a human look wherever they appear.
 SUSPICIOUS_CMDLINE = [
     (r"\b(?:curl|wget)\b[^|]*\|\s*(?:ba)?sh", "downloads and pipes straight to a shell"),
@@ -335,7 +375,9 @@ def audit_processes(root: Path, offsets=None, boot_times=None):
         deleted = "(deleted)" in exe
         in_writable = any(exe.startswith(pfx) for pfx in WRITABLE_EXEC_PREFIXES)
         in_system = any(exe.startswith(pfx) for pfx in SYSTEM_EXEC_PREFIXES)
-        known = base in KNOWN_PROCESSES or comm in KNOWN_PROCESSES
+        known = (base in KNOWN_PROCESSES or comm in KNOWN_PROCESSES
+                 or _vendor_named(base, exe)
+                 or _vendor_named(comm, exe))
 
         # A fresh pid in every sighting means a short-lived command re-run on a
         # schedule, not something resident. Snapshots catch such processes

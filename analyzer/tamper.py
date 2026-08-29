@@ -25,6 +25,7 @@ so that the ordinary weirdness of these logs does not read as tampering:
 None of these prove tampering on their own; they mark places where the record
 is not self-consistent and a human should look.
 """
+import bisect
 import re
 import statistics
 from datetime import datetime, timedelta
@@ -37,6 +38,9 @@ ROUTINE_REORDER_COUNT = 2
 ROUTINE_GAP_COUNT = 2
 # Reboots legitimately reorder and re-stamp log lines around them.
 BOOT_WINDOW = timedelta(minutes=20)
+# So does the clock being set. The correction is logged as it happens, so this
+# is tighter than the reboot window: a sync an hour away explains nothing.
+CLOCK_WINDOW = timedelta(minutes=20)
 # A log must be at least this busy for silence to be meaningful.
 DENSE_LINES_PER_DAY = 500
 # Rotations abut within a minute normally; this much daylight is a real break.
@@ -72,6 +76,47 @@ def _near_boot(when, boots):
                for b in boots)
 
 
+def _parse_syncs(syncs):
+    """(instant, record) pairs, sorted, for the ones that carry a usable time.
+
+    Parsed once here rather than inside the search: this list is pooled across
+    every log in the bundle and searched again for every backwards jump in
+    every file, so re-parsing the same strings there is the difference between
+    a bisect and millions of `fromisoformat` calls.
+    """
+    pairs = []
+    for s in syncs:
+        at = _naive(_dt(s.get("at")))
+        if at is not None:
+            pairs.append((at, s))
+    pairs.sort(key=lambda p: p[0])
+    return [p[0] for p in pairs], [p[1] for p in pairs]
+
+
+def _clock_sync_near(parsed_syncs, *whens):
+    """The clock correction that explains a jump at these instants, if any.
+
+    A clock being set produces exactly the shape this module looks for: a
+    sizeable backwards step with no reboot near it. Told apart only by the
+    device having said so, in whichever log carried the message.
+    """
+    times, records = parsed_syncs
+    if not times:
+        return None
+    window = CLOCK_WINDOW.total_seconds()
+    for when in whens:
+        if when is None:
+            continue
+        w = _naive(when)
+        # Sorted, so only the neighbours either side of this instant can be
+        # inside the window.
+        i = bisect.bisect_left(times, w)
+        for j in (i - 1, i):
+            if 0 <= j < len(times) and abs((w - times[j]).total_seconds()) <= window:
+                return records[j]
+    return None
+
+
 def _rotation_index(filename, base):
     m = ROT_NUM_RE.search(filename)
     if m:
@@ -84,6 +129,7 @@ def _rotation_index(filename, base):
 def analyze_integrity(logscan_result, boot_times=None, coverage=None):
     boots = sorted(boot_times or [])
     files = logscan_result.get("integrity") or []
+    clock_syncs = _parse_syncs(logscan_result.get("clock_syncs") or [])
     issues = []
     checked = 0
 
@@ -115,6 +161,27 @@ def analyze_integrity(logscan_result, boot_times=None, coverage=None):
                 continue
             delta = (_naive(a) - _naive(z)).total_seconds()
             if delta < BACKWARDS_MIN_SECONDS or _near_boot(a, boots):
+                continue
+            sync = _clock_sync_near(clock_syncs, a, z)
+            if sync:
+                # Still reported, because a step in the record is worth seeing
+                # and the evidence is what makes it readable, but as an
+                # observation rather than a suspicion: the device said it was
+                # setting its clock at this moment.
+                issues.append({
+                    "severity": "info",
+                    "file": rec["file"],
+                    "kind": "clock correction",
+                    "title": f"Timestamps step {int(delta)}s backwards where the "
+                             "clock was corrected",
+                    "detail": f"The line stamped {b['to']} follows one stamped "
+                              f"{b['from']}, which on its own is the shape of an "
+                              "edited log. A time synchronisation was recorded "
+                              f"within {int(CLOCK_WINDOW.total_seconds() / 60)} "
+                              "minutes of it, which accounts for the step: the "
+                              "clock moved, the log did not.",
+                    "evidence": f"{b['line']}\n{sync['line']}",
+                })
                 continue
             issues.append({
                 "severity": "major",

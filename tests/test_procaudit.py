@@ -171,6 +171,74 @@ def main():
         check("cron-invoked stock script not flagged as editing cron",
               not flags_for(res, "mem_snapshot"))
 
+    # UniFi ships different daemons on every platform, so a list of literal
+    # names describes only the hardware it was written against. A Dream Router
+    # owner saw unifi-directory flagged major and udr-ui flagged minor, both
+    # perfectly ordinary parts of their system. What keeps this from being a
+    # blanket amnesty is the path: the name is only trusted for a binary that
+    # came with the firmware.
+    print("\nVendor software on other UniFi hardware is recognised:")
+    with tempfile.TemporaryDirectory() as td:
+        vendor = [
+            {"pid": 950, "comm": "unifi-directory", "ppid": 1,
+             "exe": "/usr/sbin/unifi-directory-app", "cmdline": "unifi-directory"},
+            {"pid": 951, "comm": "udr-ui", "ppid": 1,
+             "exe": "/usr/bin/udr-ui", "cmdline": "udr-ui"},
+            {"pid": 952, "comm": "uxg-manager", "ppid": 1,
+             "exe": "/usr/bin/uxg-manager", "cmdline": "uxg-manager"},
+        ]
+        snapdir = Path(td) / "system/var/log/mem_snapshot"
+        snapdir.mkdir(parents=True)
+        for i in range(6):
+            write_snapshot(snapdir, f"20260824_{8 + i:02d}1701", BASELINE + vendor)
+        res = procaudit.audit_processes(Path(td))
+        for name in ("unifi-directory", "udr-ui", "uxg-manager"):
+            check(f"{name} in a system path is not flagged",
+                  not flags_for(res, name))
+
+    print("\nBut the name alone never grants it:")
+    with tempfile.TemporaryDirectory() as td:
+        impostor = [
+            # Same naming convention, somewhere the firmware cannot have put it.
+            {"pid": 960, "comm": "unifi-helper", "ppid": 1,
+             "exe": "/tmp/unifi-helper", "cmdline": "unifi-helper"},
+            # A vendor-looking name with no executable behind it at all.
+            {"pid": 961, "comm": "ubnt-agent", "ppid": 1},
+        ]
+        snapdir = Path(td) / "system/var/log/mem_snapshot"
+        snapdir.mkdir(parents=True)
+        for i in range(6):
+            write_snapshot(snapdir, f"20260824_{8 + i:02d}1701", BASELINE + impostor)
+        res = procaudit.audit_processes(Path(td))
+        check("a UniFi-looking name in /tmp is still flagged critical",
+              has(flags_for(res, "unifi-helper"), "writable storage"))
+        check("a UniFi-looking name with no executable is still flagged",
+              bool(flags_for(res, "ubnt-agent")))
+
+    # /opt and /usr/share are on the list of places stock firmware runs from,
+    # which is the right answer to "should the unusual-path flag fire" and the
+    # wrong one to "did this ship in the firmware": they are exactly where
+    # third-party software installs itself by convention. A name allowlist
+    # cannot stand on them, or an add-on called unifi-anything walks through on
+    # its name - the single thing the safeguard promises never happens.
+    print("\nA system-ish path that is not part of the firmware image:")
+    with tempfile.TemporaryDirectory() as td:
+        addon = [
+            {"pid": 980, "comm": "unifi-helper", "ppid": 1,
+             "exe": "/opt/unifi-helper/bin/unifi-helper",
+             "cmdline": "unifi-helper --daemon"},
+            {"pid": 981, "comm": "ucg-dash2", "ppid": 1,
+             "exe": "/usr/share/ucg-dash2/ucg-dash2", "cmdline": "ucg-dash2"},
+        ]
+        snapdir = Path(td) / "system/var/log/mem_snapshot"
+        snapdir.mkdir(parents=True)
+        for i in range(6):
+            write_snapshot(snapdir, f"20260824_{8 + i:02d}1701", BASELINE + addon)
+        res = procaudit.audit_processes(Path(td))
+        for name, where in (("unifi-helper", "/opt"), ("ucg-dash2", "/usr/share")):
+            check(f"{name} under {where} is still flagged",
+                  has(flags_for(res, name), "recognized unifi or debian stack"))
+
     print()
     if failures:
         print(f"{len(failures)} check(s) FAILED: {failures}")

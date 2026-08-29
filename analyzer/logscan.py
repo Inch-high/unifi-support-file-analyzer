@@ -32,6 +32,38 @@ MAX_INTEGRITY_SAMPLES = 12
 # a silent stretch longer than this inside one file is worth explaining
 GAP_THRESHOLD = timedelta(hours=6)
 
+MAX_CLOCK_SYNCS = 40
+# Lines that mean the clock was *moved*, not merely that a time daemon is
+# running. Matching systemd-timesyncd by name alone would match its routine
+# chatter and excuse every backwards jump in the bundle, which is the opposite
+# of the point: a corrected clock has to be distinguishable from an edited log,
+# so only the moment of correction counts.
+#
+# Every alternative below therefore has to name a step. Two near misses are
+# excluded deliberately, because each one would have widened this into the
+# blanket the paragraph above rules out:
+#
+#   * timesyncd's plain "Synchronized to time server X" is its success
+#     message, logged for a slewed or entirely no-op sync just as readily as
+#     for a step, and on older systemd once per poll. Only the *initial*
+#     synchronisation is kept: the first sync after boot sets the clock
+#     outright, so that one really is a step.
+#   * "setting time to" on its own matches lines with no connection to the
+#     clock - "setting time to live to 300" from a resolver, "setting time to
+#     5 minutes" from a cache - so it must be followed by something actually
+#     shaped like an instant. A bare digit is not enough; the expiry says "5".
+CLOCK_SYNC_RE = re.compile(
+    r"Time has been changed"
+    r"|Initial synchroni[sz]ation to time server"
+    r"|time reset [-+]?\d"
+    r"|step time server"
+    r"|setting (?:the )?(?:system |hardware )?(?:time|clock) to "
+    r"(?:\d{4}-\d{2}-\d{2}|\d{1,2}:\d{2}:\d{2}|\w{3} \w{3} ?\d)"
+    r"|system clock wrong by"
+    r"|clock was stepped"
+    r"|system clock (?:has been )?(?:set|stepped|adjusted)",
+    re.I)
+
 
 class _Integrity:
     """Per-file timestamp-sequence state."""
@@ -51,6 +83,23 @@ class _Integrity:
         # is exhibiting its normal character, not evidence of an edit
         self.backwards_total = 0
         self.gaps_total = 0
+        # When the clock itself was set. Collected here because this pass
+        # already reads every line of every log; the integrity checks need it
+        # to tell a corrected clock from a rewritten log.
+        #
+        # Unlike the sample lists above, this one is *decided on* rather than
+        # merely displayed, so it must not simply stop at the first N. A log
+        # that records a sync at every boot passes any fixed cap partway
+        # through, and truncating there would leave every jump in the rest of
+        # the file unexplained - reintroducing exactly the false positive this
+        # exists to remove, silently, and only on the longest bundles. So when
+        # the cap is reached the retained set is halved and the sampling
+        # stride doubled, which keeps it spanning the whole file. The total is
+        # reported alongside so the thinning is visible rather than implied.
+        self.clock_syncs = []
+        self.clock_syncs_total = 0
+        self._sync_stride = 1
+        self._sync_seen = 0
 
     def feed(self, line):
         self.lines += 1
@@ -59,6 +108,14 @@ class _Integrity:
             return
         s = m.group(1)
         self.stamped += 1
+        if CLOCK_SYNC_RE.search(line):
+            self.clock_syncs_total += 1
+            self._sync_seen += 1
+            if self._sync_seen % self._sync_stride == 0:
+                self.clock_syncs.append({"at": s, "line": line.strip()[:200]})
+                if len(self.clock_syncs) >= MAX_CLOCK_SYNCS:
+                    self.clock_syncs = self.clock_syncs[::2]
+                    self._sync_stride *= 2
         if self.first is None:
             self.first = s
         self.last = s
@@ -91,7 +148,9 @@ class _Integrity:
                 "stamped_lines": self.stamped, "first": self.first,
                 "last": self.last, "backwards": self.backwards,
                 "backwards_total": self.backwards_total,
-                "gaps": self.gaps, "gaps_total": self.gaps_total}
+                "gaps": self.gaps, "gaps_total": self.gaps_total,
+                "clock_syncs": self.clock_syncs,
+                "clock_syncs_total": self.clock_syncs_total}
 
 PATTERNS = [
     # (key, severity, regex, exclusion regex or None, title)
@@ -300,7 +359,16 @@ def scan_logs(root: Path, boot_times=None, workers=None):
         h["groups"] = dict(sorted(h["groups"].items(), key=lambda kv: -kv[1])[:8])
     sev_rank = {"critical": 0, "major": 1, "minor": 2}
     found.sort(key=lambda h: (sev_rank[h["severity"]], -h["count"]))
+    # Every log's clock corrections, pooled: a jump in one file is explained by
+    # a sync recorded in whichever log happened to carry it, which is rarely
+    # the same file.
+    clock_syncs = sorted(
+        {(c["at"], c["line"]) for rec in integrity
+         for c in rec.get("clock_syncs") or ()})
+    clock_syncs_total = sum(rec.get("clock_syncs_total", 0) for rec in integrity)
     return {"patterns": found,
             "integrity": integrity,
+            "clock_syncs": [{"at": at, "line": line} for at, line in clock_syncs],
+            "clock_syncs_total": clock_syncs_total,
             "gap_threshold_hours": GAP_THRESHOLD.total_seconds() / 3600,
             "shutdown_window_min": SHUTDOWN_NOISE_WINDOW.total_seconds() / 60}

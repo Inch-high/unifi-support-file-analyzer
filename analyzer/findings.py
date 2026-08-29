@@ -36,12 +36,17 @@ def build_findings(overview, boots, memory, logscan, ramoops_text, cpu=None,
                   "evidence": evidence or []})
 
     # --- log integrity ------------------------------------------------------
+    # The caveat belongs on an issue that is asking a question. An issue that
+    # has already answered it - the clock correction, which names the sync line
+    # that accounts for the step - would be contradicted by being told that a
+    # clock correction produces the same evidence.
+    UNRESOLVED = (" This is a prompt to look, not proof of tampering: a logging "
+                  "service that stopped, a clock correction, or a manual cleanup "
+                  "produces the same evidence.")
     for issue in (tamper.get("issues") or [])[:8]:
         add(issue["severity"],
             f"Log integrity, {issue['title']} ({issue['file'].rsplit('/', 1)[-1]})",
-            issue["detail"] + " This is a prompt to look, not proof of tampering: "
-            "a logging service that stopped, a clock correction, or a manual "
-            "cleanup produces the same evidence.",
+            issue["detail"] + ("" if issue["severity"] == "info" else UNRESOLVED),
             [{"time": None, "file": issue["file"], "line": issue["evidence"]}]
             if issue.get("evidence") else None)
 

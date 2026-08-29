@@ -81,3 +81,6 @@ jobs:
       # whatever the person making it happened to click on.
       - name: History tab
         run: node tests/test_history_view.js
+
+      - name: Privacy tab, and where a slow result lands
+        run: node tests/test_privacy_view.js
