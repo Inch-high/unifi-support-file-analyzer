@@ -12,7 +12,9 @@ from fastapi.staticfiles import StaticFiles
 from . import (bundle, boots, compare, coverage, cpu, findings, forensics,
                gclog, lan, logscan, memory, overview, pii, procaudit,
                sanitise, tamper)
+from . import firmware
 from .logutil import build_offset_map, open_log
+from . import __version__
 
 BASE = Path(__file__).resolve().parent.parent
 STATIC = BASE / "static"
@@ -21,12 +23,30 @@ STATIC = BASE / "static"
 # `tail` cannot ask the server to hold an entire log in memory again.
 MAX_TAIL_LINES = 100_000
 
-app = FastAPI(title="UniFi Support File Analyzer")
+app = FastAPI(title="UniFi Support File Analyzer", version=__version__)
 
 
 @app.get("/", response_class=HTMLResponse)
 def index():
     return (STATIC / "index.html").read_text(encoding="utf-8")
+
+
+@app.get("/api/version")
+def api_version():
+    """What is running, and what it is comparing against.
+
+    Worth an endpoint of its own because the two facts a bug report needs are
+    both here: which build of this tool, and which firmware record it judged a
+    device's processes by. Neither is otherwise visible from outside.
+    """
+    manifest = firmware._manifest()
+    return {
+        "version": __version__,
+        "firmware_manifest": {
+            "available": firmware.available(),
+            "models": sorted((manifest.get("models") or {})),
+        },
+    }
 
 
 @app.get("/api/bundles")
