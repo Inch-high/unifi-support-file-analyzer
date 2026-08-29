@@ -1,6 +1,8 @@
 # Anything holding your own network's data must never be committed.
-# Extracted files, cached analysis and cleaned exports:
-data/
+# Extracted files, cached analysis and cleaned exports. Anchored to the root:
+# unanchored, this also matched analyzer/data/, which holds shipped reference
+# data and silently failed to commit.
+/data/
 # Support files themselves:
 *.tgz
 # A support file that was extracted in place next to the code:

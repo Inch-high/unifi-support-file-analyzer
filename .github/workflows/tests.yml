@@ -58,6 +58,9 @@ jobs:
       - name: Encoding is not left to the platform
         run: python tests/test_encoding.py
 
+      - name: Firmware manifest
+        run: python tests/test_firmware.py
+
       - name: Process audit
         run: python tests/test_procaudit.py
 
