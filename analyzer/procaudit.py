@@ -25,6 +25,8 @@ import tarfile
 from datetime import timedelta
 from pathlib import Path
 
+from . import firmware
+
 try:
     import zstandard
 except ImportError:
@@ -62,82 +64,50 @@ SYSTEM_EXEC_PREFIXES = (
     "/bin/", "/sbin/", "/lib/", "/opt/",
 )
 
-# Expected UniFi OS / Debian base stack. Membership only downgrades a process
-# from "unrecognized" to "known"; it never suppresses a path or behaviour flag.
+# What the firmware manifest cannot say on its own. It used to hold 151 names
+# and carry the whole question of "is this stock"; the images answer that far
+# better, so 106 of them are gone as duplicates of the manifest. Removing the
+# rest would create false alarms, and each is kept for one of two reasons.
+#
+# Membership only downgrades a process from "unrecognized" to "known"; it never
+# suppresses a path or behaviour flag.
 KNOWN_PROCESSES = {
-    # UniFi OS platform
+    # 1. Not a filename in any image, so no listing could ever contain it.
+    #    Thread names, kernel and pseudo entries, and comm values the kernel
+    #    truncated somewhere other than its own 15-character limit.
+    "Suricata-Main", "dnscrypt-prox", "exe", "kthreadd", "systemd-udevd",
+    "uos-discovery-", "ui-hdd-pwrctl", "node",
+    #    postfix runs its daemons under names of its own
+    "master", "pickup", "qmgr",
+    # 2. Present in some images but not all, so a per-model comparison would
+    #    report them on the models that lack them. The UniFi stack proper is
+    #    here because the UXG and Express builds are slimmer than the Dream
+    #    Machine ones and genuinely do not ship all of it.
     "unifi", "unifi-core", "unifi-cloud-agent", "unifi-mq-broker",
-    "unifi-identity-update-app", "unifi-mongo-ser", "ubios-udapi-server",
-    "udapi-bridge", "uos-agent", "uos-discovery-client", "uos-discovery-",
-    "ulcmd", "ulp-go-app", "ulogd", "ustate", "usd", "usdbd", "uhwd", "ubnd",
-    "utermd", "rpsd", "lagd", "mcad", "ubnt_monitor", "ubnt-idsips-daemon",
-    "ubntmdnsd", "teleportd", "wifiman-proxy", "wifiman-speedtest",
-    "dpi-flow-stats", "improxy", "dns-cache-db", "linkcheck", "dpinger",
-    "Suricata-Main", "suricata", "smemcap", "uid-agent", "ui-hdd-pwrctl",
-    # databases / runtimes the stack ships
+    "unifi-identity-update-app", "unifi-mongo-ser", "uos-agent",
+    "uos-discovery-client", "ulcmd", "ulp-go-app", "ustate", "usd", "usdbd",
+    "uhwd", "ubnd", "ubntmdnsd", "uid-agent", "rpsd", "lagd", "dns-cache-db",
+    "smemcap", "mem_snapshot",
+    #    runtimes and databases, which live in version-stamped directories
     "mongod", "postgres", "beam.smp", "epmd", "erl_child_setup",
-    "inet_gethost", "node24", "node", "java",
-    # Debian base
-    "systemd", "systemd-journal", "systemd-journald", "systemd-udevd",
-    "systemd-network", "systemd-networkd", "systemd-logind", "systemd-timesyn",
-    "systemd-timesyncd", "systemd-timedat", "systemd-timedated", "udevadm",
-    "dbus-daemon", "cron", "agetty", "nginx", "openvpn", "dnsmasq",
-    "dnscrypt-proxy", "dnscrypt-prox", "avahi-daemon", "lldpd", "freeradius",
-    "syslog-ng", "watchdog", "earlyoom", "networkd-dispat", "hciattach",
-    "udhcpc", "busybox-legacy", "arping", "ndisc6", "run-parts", "zstd",
-    "sleep", "sh", "dash", "bash", "python3.9", "python3", "master", "qmgr",
-    "pickup", "mem_snapshot", "kthreadd", "exe", "logrotate", "systemd-notify",
-    "systemd-tmpfile", "systemd-tmpfiles", "systemd-sysctl", "systemd-cgroups",
-    # Stock userland utilities. Allowlisting these only silences the name-based
-    # check; a hostile use of any of them still trips the path, library and
-    # command-line rules, which do not consult this list.
-    "curl", "wget", "tar", "gzip", "gunzip", "find", "grep", "sed", "awk",
-    "cat", "cp", "mv", "rm", "ls", "date", "mkdir", "chmod", "chown", "df",
-    "du", "ip", "iptables", "ip6tables", "ipset", "conntrack", "ping", "ping6",
-    "dig", "nslookup", "ss", "netstat", "systemctl", "journalctl", "dpkg",
-    "dpkg-query", "apt", "apt-get", "ldconfig", "getty", "login", "su", "sudo",
-    "ubnt-tools", "uname", "sync", "touch", "sort", "head", "tail", "wc", "xargs",
+    "inet_gethost", "node24", "java",
+    #    base-system daemons not carried by every model
+    "earlyoom", "hciattach", "ndisc6", "watchdog",
 }
 
-# UniFi ships a different set of daemons on every platform - unifi-directory
-# and udr-ui on a Dream Router, others on a Cloud Gateway - so a list of
-# literal names can only ever describe the hardware it was written against.
-# Reported as false alarms by someone running a device this was not: a
-# perfectly ordinary UniFi service, flagged major purely because it listened
-# on a socket and its name had never been seen here.
-#
-# The vendor's naming conventions are recognised as well, but only for a
-# binary that shipped in the firmware, which is what the path check below
-# establishes. That distinction is the whole safeguard: an add-on cannot get
-# into a system directory on a read-only squashfs, so it lands somewhere
-# writable and trips the path rule at critical no matter what it is named.
-# A name alone never grants this.
-VENDOR_NAME_RE = re.compile(
-    r"^(?:unifi|uos|ubios|ubnt|udapi|ulp|udm|udr|ucg|uxg|uap|usw)[-_]?[a-z0-9]",
-    re.I)
-
-# Which system paths that safeguard can actually stand on. SYSTEM_EXEC_PREFIXES
-# answers a laxer question - "is this one of the directories stock firmware
-# runs from" - and includes /opt and /usr/share, which are exactly where
-# third-party software installs itself by convention. That is harmless for the
-# path flag, whose absence merely says nothing, but it cannot carry a *name*
-# allowlist: an add-on under /opt called unifi-anything would otherwise be
-# waved through on its name alone, which is the one thing the paragraph above
-# promises never happens. Only directories that are part of the read-only image
-# count here.
-FIRMWARE_EXEC_PREFIXES = (
-    "/usr/bin/", "/usr/sbin/", "/usr/lib/", "/usr/libexec/",
-    "/bin/", "/sbin/", "/lib/",
-)
-
-
-def _vendor_named(name, exe):
-    """Whether this looks like vendor software that came with the firmware."""
-    if not name or not exe:
-        return False
-    if not any(exe.startswith(pfx) for pfx in FIRMWARE_EXEC_PREFIXES):
-        return False
-    return bool(VENDOR_NAME_RE.match(name))
+# Shipped everywhere, and still worth saying so. Reading the firmware settled
+# an argument in an unexpected direction: sshd is present in all fifteen
+# gateway images, so on the question the audit actually asks - did this come
+# with the device - it is stock, and naming it "unrecognised" was never right.
+# But the person who reported it was right that they wanted to know, and an
+# appliance answering SSH is worth a sentence whoever put it there. Being
+# shipped and being switched on are different facts, and this is the second.
+NOTABLE_SERVICES = {
+    "sshd": "answers SSH",
+    "dropbear": "answers SSH",
+    "telnetd": "answers telnet, which carries credentials in the clear",
+    "tcpdump": "captures traffic",
+}
 
 # Command lines worth a human look wherever they appear.
 SUSPICIOUS_CMDLINE = [
@@ -315,6 +285,7 @@ def audit_processes(root: Path, offsets=None, boot_times=None):
         return {"error": "no memory snapshots in this bundle"}
 
     snaps = sorted(snapdir.glob("smemcap_*.zst"), key=lambda p: p.name)
+    shipped = firmware.for_device(root)
     ps_rows = parse_ps(root)
     sockets = parse_netstat(root)
     sock_by_prog = {}
@@ -375,9 +346,8 @@ def audit_processes(root: Path, offsets=None, boot_times=None):
         deleted = "(deleted)" in exe
         in_writable = any(exe.startswith(pfx) for pfx in WRITABLE_EXEC_PREFIXES)
         in_system = any(exe.startswith(pfx) for pfx in SYSTEM_EXEC_PREFIXES)
-        known = (base in KNOWN_PROCESSES or comm in KNOWN_PROCESSES
-                 or _vendor_named(base, exe)
-                 or _vendor_named(comm, exe))
+        known = (shipped.has(base) or shipped.has(comm)
+                 or base in KNOWN_PROCESSES or comm in KNOWN_PROCESSES)
 
         # A fresh pid in every sighting means a short-lived command re-run on a
         # schedule, not something resident. Snapshots catch such processes
@@ -441,12 +411,38 @@ def audit_processes(root: Path, offsets=None, boot_times=None):
                           "Ports associated with remote access or mining rather than "
                           "anything a gateway normally serves."))
 
+        # Being switched on is a separate fact from having shipped, and the
+        # audit only ever reported the second. Named here whether or not the
+        # binary is stock, because on an appliance it is the running that
+        # matters.
+        service_note = NOTABLE_SERVICES.get(base) or NOTABLE_SERVICES.get(comm)
+        if service_note and not rec["kernel_thread"]:
+            flags.append(("minor", f"a service that {service_note} is running",
+                          "It ships with the firmware, so this is not a sign of "
+                          "anything having been added, but an appliance is not "
+                          "usually expected to offer it. Worth knowing it is on, "
+                          "and turning off if you did not mean to enable it."))
+
         if not known and not rec["kernel_thread"]:
             sev = "major" if (socks or in_writable) else "minor"
-            flags.append((sev, "not part of the recognized UniFi or Debian stack",
-                          "This is a name-based check, so a firmware update or an "
-                          "add-on you installed can legitimately land here, worth "
-                          "identifying rather than assuming either way."))
+            if shipped.known_model:
+                detail = (
+                    f"Not present in the {shipped.label or shipped.code} firmware "
+                    f"this tool has a record of"
+                    + ("" if shipped.exact_version
+                       else f" ({shipped.manifest_version or 'a different build'}, "
+                            f"while this device reports "
+                            f"{shipped.device_version or 'nothing'})")
+                    + ". An add-on you installed lands here, and so would a "
+                    "binary added by anything else, which is the point of "
+                    "saying it rather than assuming either way.")
+            else:
+                detail = (
+                    "This device's model is not in the firmware record, so the "
+                    "comparison is against every UniFi OS gateway image instead, "
+                    "which is weaker: something shipped only on this hardware "
+                    "would look added. Worth identifying rather than assuming.")
+            flags.append((sev, "not present in the device's firmware", detail))
 
         # appeared partway through the retained history
         appeared_late = (first_snapshot and rec["first_seen"] > first_snapshot
@@ -512,4 +508,15 @@ def audit_processes(root: Path, offsets=None, boot_times=None):
             {"proto": s["proto"], "addr": s["addr"], "port": s["port"],
              "program": s["program"], "pid": s["pid"]} for s in orphan_sockets][:20],
         "history_from": first_snapshot.isoformat() if first_snapshot else None,
+        # What "not present in the device's firmware" was measured against, so
+        # the answer can be weighed rather than taken on faith.
+        "firmware": {
+            "model": shipped.code,
+            "label": shipped.label,
+            "known_model": shipped.known_model,
+            "device_version": shipped.device_version,
+            "manifest_version": shipped.manifest_version,
+            "exact_version": shipped.exact_version,
+            "names": len(shipped.names),
+        },
     }

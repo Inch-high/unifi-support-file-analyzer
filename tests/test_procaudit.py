@@ -171,73 +171,101 @@ def main():
         check("cron-invoked stock script not flagged as editing cron",
               not flags_for(res, "mem_snapshot"))
 
-    # UniFi ships different daemons on every platform, so a list of literal
-    # names describes only the hardware it was written against. A Dream Router
-    # owner saw unifi-directory flagged major and udr-ui flagged minor, both
-    # perfectly ordinary parts of their system. What keeps this from being a
-    # blanket amnesty is the path: the name is only trusted for a binary that
-    # came with the firmware.
-    print("\nVendor software on other UniFi hardware is recognised:")
-    with tempfile.TemporaryDirectory() as td:
-        vendor = [
-            {"pid": 950, "comm": "unifi-directory", "ppid": 1,
-             "exe": "/usr/sbin/unifi-directory-app", "cmdline": "unifi-directory"},
-            {"pid": 951, "comm": "udr-ui", "ppid": 1,
-             "exe": "/usr/bin/udr-ui", "cmdline": "udr-ui"},
-            {"pid": 952, "comm": "uxg-manager", "ppid": 1,
-             "exe": "/usr/bin/uxg-manager", "cmdline": "uxg-manager"},
-        ]
+    # Whether a binary is stock is now read out of the firmware images rather
+    # than guessed from its name. A Dream Router owner saw unifi-directory
+    # flagged major and udr-ui minor, both perfectly ordinary; the images say
+    # so, so they are recognised on any model.
+    def bundle_with(procs, version=None):
+        """A snapshot bundle, optionally reporting a firmware version."""
+        td = tempfile.mkdtemp()
         snapdir = Path(td) / "system/var/log/mem_snapshot"
         snapdir.mkdir(parents=True)
         for i in range(6):
-            write_snapshot(snapdir, f"20260824_{8 + i:02d}1701", BASELINE + vendor)
-        res = procaudit.audit_processes(Path(td))
-        for name in ("unifi-directory", "udr-ui", "uxg-manager"):
-            check(f"{name} in a system path is not flagged",
-                  not flags_for(res, name))
+            write_snapshot(snapdir, f"20260824_{8 + i:02d}1701", BASELINE + procs)
+        if version:
+            (Path(td) / "system").mkdir(parents=True, exist_ok=True)
+            (Path(td) / "system/system-version").write_text(version,
+                                                            encoding="utf-8")
+        return Path(td)
 
-    print("\nBut the name alone never grants it:")
-    with tempfile.TemporaryDirectory() as td:
-        impostor = [
-            # Same naming convention, somewhere the firmware cannot have put it.
-            {"pid": 960, "comm": "unifi-helper", "ppid": 1,
-             "exe": "/tmp/unifi-helper", "cmdline": "unifi-helper"},
-            # A vendor-looking name with no executable behind it at all.
-            {"pid": 961, "comm": "ubnt-agent", "ppid": 1},
-        ]
-        snapdir = Path(td) / "system/var/log/mem_snapshot"
-        snapdir.mkdir(parents=True)
-        for i in range(6):
-            write_snapshot(snapdir, f"20260824_{8 + i:02d}1701", BASELINE + impostor)
-        res = procaudit.audit_processes(Path(td))
-        check("a UniFi-looking name in /tmp is still flagged critical",
-              has(flags_for(res, "unifi-helper"), "writable storage"))
-        check("a UniFi-looking name with no executable is still flagged",
-              bool(flags_for(res, "ubnt-agent")))
+    print("\nWhat the firmware ships is recognised, whatever the model:")
+    res = procaudit.audit_processes(bundle_with([
+        {"pid": 950, "comm": "unifi-directory", "ppid": 1,
+         "exe": "/usr/sbin/unifi-directory-app", "cmdline": "unifi-directory"},
+        {"pid": 951, "comm": "udr-ui", "ppid": 1,
+         "exe": "/usr/bin/udr-ui", "cmdline": "udr-ui"},
+    ]))
+    for name in ("unifi-directory", "udr-ui"):
+        check(f"{name} is not flagged", not flags_for(res, name))
 
-    # /opt and /usr/share are on the list of places stock firmware runs from,
-    # which is the right answer to "should the unusual-path flag fire" and the
-    # wrong one to "did this ship in the firmware": they are exactly where
-    # third-party software installs itself by convention. A name allowlist
-    # cannot stand on them, or an add-on called unifi-anything walks through on
-    # its name - the single thing the safeguard promises never happens.
-    print("\nA system-ish path that is not part of the firmware image:")
-    with tempfile.TemporaryDirectory() as td:
-        addon = [
-            {"pid": 980, "comm": "unifi-helper", "ppid": 1,
-             "exe": "/opt/unifi-helper/bin/unifi-helper",
-             "cmdline": "unifi-helper --daemon"},
-            {"pid": 981, "comm": "ucg-dash2", "ppid": 1,
-             "exe": "/usr/share/ucg-dash2/ucg-dash2", "cmdline": "ucg-dash2"},
-        ]
-        snapdir = Path(td) / "system/var/log/mem_snapshot"
-        snapdir.mkdir(parents=True)
-        for i in range(6):
-            write_snapshot(snapdir, f"20260824_{8 + i:02d}1701", BASELINE + addon)
-        res = procaudit.audit_processes(Path(td))
-        for name, where in (("unifi-helper", "/opt"), ("ucg-dash2", "/usr/share")):
-            check(f"{name} under {where} is still flagged",
-                  has(flags_for(res, name), "recognized unifi or debian stack"))
+    # The case the old rule got wrong. A name-prefix allowlist waved anything
+    # called unifi-* or ucg-* through as long as it sat in a system directory;
+    # neither of these ships in any image, and the firmware says so.
+    print("\nA vendor-shaped name that ships nowhere is not excused:")
+    res = procaudit.audit_processes(bundle_with([
+        {"pid": 952, "comm": "uxg-manager", "ppid": 1,
+         "exe": "/usr/bin/uxg-manager", "cmdline": "uxg-manager"},
+        {"pid": 953, "comm": "ucg-dash2", "ppid": 1,
+         "exe": "/usr/bin/ucg-dash2", "cmdline": "ucg-dash2 --serve"},
+    ]))
+    for name in ("uxg-manager", "ucg-dash2"):
+        check(f"{name} in /usr/bin is flagged",
+              has(flags_for(res, name), "firmware"))
+
+    print("\nAnd wherever else it runs from:")
+    res = procaudit.audit_processes(bundle_with([
+        {"pid": 960, "comm": "unifi-helper", "ppid": 1,
+         "exe": "/tmp/unifi-helper", "cmdline": "unifi-helper"},
+        {"pid": 961, "comm": "ubnt-agent", "ppid": 1},
+        {"pid": 980, "comm": "unifi-daemon", "ppid": 1,
+         "exe": "/opt/unifi-daemon/bin/unifi-daemon", "cmdline": "unifi-daemon"},
+        {"pid": 981, "comm": "ucg-dash2", "ppid": 1,
+         "exe": "/usr/share/ucg-dash2/ucg-dash2", "cmdline": "ucg-dash2"},
+    ]))
+    check("a UniFi-looking name in /tmp is still flagged critical",
+          has(flags_for(res, "unifi-helper"), "writable storage"))
+    check("a UniFi-looking name with no executable is still flagged",
+          bool(flags_for(res, "ubnt-agent")))
+    for name, where in (("unifi-daemon", "/opt"), ("ucg-dash2", "/usr/share")):
+        check(f"{name} under {where} is still flagged",
+              has(flags_for(res, name), "firmware"))
+
+    # Which image the comparison used is part of the finding, because "not in
+    # the firmware" means much less when the firmware on record is not the one
+    # the device is running.
+    print("\nThe device's own model is used when the bundle names it:")
+    res = procaudit.audit_processes(bundle_with(
+        [{"pid": 970, "comm": "ucg-dash2", "ppid": 1,
+          "exe": "/usr/bin/ucg-dash2", "cmdline": "ucg-dash2"}],
+        version="UDMPRO.al324.v5.1.31.5acc35d.260819.1714"))
+    fw = res.get("firmware") or {}
+    check("the model is resolved from system-version", fw.get("model") == "UDMPRO")
+    check("and recognised as one we have", fw.get("known_model") is True)
+    check("the version is noted as an exact match", fw.get("exact_version") is True)
+    check("an add-on is still flagged against it",
+          has(flags_for(res, "ucg-dash2"), "firmware"))
+
+    print("\nAn unrecognised model falls back, and says so:")
+    res = procaudit.audit_processes(bundle_with(
+        [{"pid": 971, "comm": "ucg-dash2", "ppid": 1,
+          "exe": "/usr/bin/ucg-dash2", "cmdline": "ucg-dash2"}],
+        version="NOSUCHMODEL.xx.v9.9.9.abc.111111.0000"))
+    fw = res.get("firmware") or {}
+    check("the model is not claimed to be known", fw.get("known_model") is False)
+    check("but the comparison still happens", fw.get("names", 0) > 1000)
+    check("and an add-on is still flagged",
+          has(flags_for(res, "ucg-dash2"), "firmware"))
+
+    # sshd ships on all fifteen gateways, so calling it unrecognised was never
+    # right - but an appliance answering SSH is still worth a sentence.
+    print("\nA stock service that is nonetheless worth knowing about:")
+    res = procaudit.audit_processes(bundle_with([
+        {"pid": 990, "comm": "sshd", "ppid": 1, "exe": "/usr/sbin/sshd",
+         "cmdline": "/usr/sbin/sshd -D"},
+    ]))
+    check("sshd is not called unrecognised",
+          not has(flags_for(res, "sshd"), "firmware"))
+    check("but its being on is reported", has(flags_for(res, "sshd"), "ssh"))
 
     print()
     if failures:
