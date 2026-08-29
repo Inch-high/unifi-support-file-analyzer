@@ -10,6 +10,7 @@ const esc = s => String(s ?? '').replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&g
 
 const state = { bid: null, data: null, tab: 'findings', charts: [],
                 gcRun: null, logFrom: '', logTo: '', pii: null,
+                piiError: null, piiRunning: false,
                 piiFilter: null, piiShowAll: false, piiQuery: '', piiReveal: false,
                 fxFilter: null, bundleList: null, cmp: null, cmpA: null, cmpB: null,
                 sanitise: null, sanitiseKeep: {} };
@@ -78,7 +79,23 @@ function writeHash() {
   if (location.hash !== next) history.replaceState(null, '', next);
 }
 
+// Everything held per bundle rather than per session. A privacy report, or a
+// failure, or a cleaned copy belongs to the bundle it was produced from and
+// means nothing against another one - and on the Privacy tab in particular,
+// showing one bundle's secrets under another's name is the worst place to get
+// this wrong.
+function forgetBundleWork() {
+  state.pii = null;
+  state.piiError = null;
+  state.piiRunning = false;
+  state.piiFilter = null;
+  state.piiQuery = '';
+  state.piiShowAll = false;
+  state.sanitise = null;
+}
+
 async function loadAnalysis(bid, refresh) {
+  if (bid !== state.bid) forgetBundleWork();
   state.bid = bid;
   render(el('div', { className: 'card' }, el('span', { className: 'spin' }), ' Analyzing bundle…'));
   try {
@@ -1028,20 +1045,31 @@ function sanitiseBlock() {
   box.append(el('div', { className: 'row', style: 'margin-top:11px' },
     el('button', {
       className: 'primary', textContent: 'Create cleaned copy',
-      onclick: async e => {
-        e.target.disabled = true;
+      // Disabled from state, not from the click. `e.target.disabled` only ever
+      // reached the one node that was clicked, and this whole block is rebuilt
+      // every time the tab is drawn - so coming back to Privacy mid-run gave
+      // you a spinner and a live button side by side, and a second run that
+      // rewrites every file in the bundle again.
+      disabled: !!s?.running,
+      onclick: async () => {
+        if (state.sanitise?.running) return;
+        const bid = state.bid;
         state.sanitise = { running: true };
-        viewPrivacy();
+        repaintIf('privacy', viewPrivacy);
+        let done = null, failure = null;
         try {
           const kept = Object.entries(state.sanitiseKeep || {})
             .filter(([, v]) => v).map(([k]) => k);
-          state.sanitise = await api(
-            `/api/bundle/${encodeURIComponent(state.bid)}/sanitise`,
+          done = await api(
+            `/api/bundle/${encodeURIComponent(bid)}/sanitise`,
             { method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ keep: kept }) });
         } catch (err) {
-          state.sanitise = { error: err.message };
+          failure = err.message;
         }
+        // A cleaned copy of another bundle is not this bundle's to offer.
+        if (state.bid !== bid) return;
+        state.sanitise = failure !== null ? { error: failure } : done;
         repaintIf('privacy', viewPrivacy);
       },
     })));
@@ -1104,6 +1132,21 @@ async function viewPrivacy() {
       `It reads every text file in the bundle, so it runs only when you ask.`));
 
   if (!p) {
+    // That a scan is running has to live in state, not only in the markup the
+    // click happened to leave behind. Disabling the button that was clicked
+    // says nothing about the button drawn the next time this tab is opened, so
+    // without this a reader who stepped away and came back mid-scan was shown
+    // a fresh Run button, as though nothing were happening, and clicking it
+    // started a second scan of every file in the bundle.
+    if (state.piiRunning) {
+      render(intro, el('div', { className: 'card' },
+        el('span', { className: 'spin' }),
+        state.piiRunning === true
+          ? ' Scanning every file in the bundle, this takes a couple of minutes.'
+          : state.piiRunning));
+      return;
+    }
+
     // A failure is kept in state rather than painted straight out, for the
     // same reason the success is: by the time it arrives the user may be
     // reading another tab, and it should be waiting here when they return.
@@ -1115,18 +1158,26 @@ async function viewPrivacy() {
       el('div', { className: 'card', style: 'margin-top:15px' },
         el('button', {
           className: 'primary', textContent: 'Run privacy scan',
-          onclick: async e => {
-            e.target.disabled = true;
+          onclick: async () => {
+            // Which bundle asked. The selector is live throughout, and a
+            // report belongs to the bundle it was scanned from - showing one
+            // bundle's secrets under another's name is the worst version of
+            // this mistake, so a result that outlives its bundle is dropped
+            // rather than stored.
+            const bid = state.bid;
+            state.piiRunning = true;
             state.piiError = null;
-            render(intro, el('div', { className: 'card' },
-              el('span', { className: 'spin' }),
-              ' Scanning every file in the bundle, this takes a couple of minutes.'));
+            repaintIf('privacy', viewPrivacy);
+            let got = null, failure = null;
             try {
-              state.pii = await api(`/api/bundle/${encodeURIComponent(state.bid)}/pii` +
+              got = await api(`/api/bundle/${encodeURIComponent(bid)}/pii` +
                 `?reveal=${state.piiReveal ? 'true' : 'false'}`);
             } catch (err) {
-              state.piiError = err.message;
+              failure = err.message;
             }
+            if (state.bid !== bid) return;
+            state.piiRunning = false;
+            if (failure !== null) state.piiError = failure; else state.pii = got;
             repaintIf('privacy', viewPrivacy);
           },
         }),
@@ -1230,18 +1281,31 @@ async function viewPrivacy() {
       el('label', { className: 'small', style: 'display:flex;align-items:center;gap:6px' },
         el('input', {
           type: 'checkbox', checked: !!state.piiReveal,
+          // The same scan, reached by a different control, so it has to be
+          // held the same way: this one re-reads the whole bundle too, and
+          // painting its result unconditionally is the very thing repaintIf
+          // exists to stop.
           onchange: async e => {
+            const bid = state.bid;
             state.piiReveal = e.target.checked;
-            state.pii = null;
-            render(el('div', { className: 'card' }, el('span', { className: 'spin' }),
-              state.piiReveal ? ' Re-scanning with values revealed…'
-                              : ' Loading masked results…'));
+            state.pii = undefined;
+            state.piiError = null;
+            // Truthy either way; the string is what the spinner says, since
+            // this control's wait means something different to the reader.
+            state.piiRunning = state.piiReveal
+              ? ' Re-scanning with values revealed…'
+              : ' Loading masked results…';
+            repaintIf('privacy', viewPrivacy);
+            let got = null, failure = null;
             try {
-              state.pii = await api(
-                `/api/bundle/${encodeURIComponent(state.bid)}/pii` +
+              got = await api(
+                `/api/bundle/${encodeURIComponent(bid)}/pii` +
                 `?reveal=${state.piiReveal ? 'true' : 'false'}`);
-            } catch (err) { state.pii = null; }
-            viewPrivacy();
+            } catch (err) { failure = err.message; }
+            if (state.bid !== bid) return;
+            state.piiRunning = false;
+            if (failure !== null) state.piiError = failure; else state.pii = got;
+            repaintIf('privacy', viewPrivacy);
           },
         }),
         'Reveal actual values')),

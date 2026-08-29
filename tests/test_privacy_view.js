@@ -51,7 +51,8 @@ class El {
 }
 
 const byId = {};
-for (const id of ['addBtn', 'fileInput', 'bundleSel', 'reanalyze', 'tabs', 'main']) {
+for (const id of ['addBtn', 'fileInput', 'bundleSel', 'reanalyze', 'tabs', 'main',
+                  'devsub']) {
   byId[id] = new El('div');
 }
 
@@ -82,6 +83,15 @@ const scanResult = {
   max_bytes_per_file: 1048576, masked: true,
 };
 
+// Enough of an analysis for loadAnalysis to get as far as drawing a tab, so
+// that switching bundles can be exercised through the real code path rather
+// than by poking state by hand.
+const analysisResult = {
+  id: 'support-OTHER',
+  overview: { device: { name: 'UDR' }, firmware: '4.0.6' },
+  findings: { findings: [], counts: {} },
+};
+
 function respond(body) {
   return {
     ok: true,
@@ -102,8 +112,13 @@ const sandbox = {
   location: { hash: '' },
   history: { replaceState: () => {} },
   fetch: async (url) => {
-    if (String(url).includes('/api/bundles')) return respond([]);
-    if (String(url).includes('/pii')) {
+    const u = String(url);
+    if (u.includes('/api/bundles')) return respond([]);
+    if (u.includes('/analysis')) return respond(analysisResult);
+    // The cheap "is one already cached" probe answers at once; only the real
+    // scan is held open.
+    if (u.includes('/pii')) {
+      if (u.includes('only_cached=true')) return respond({ pending: true });
       return new Promise(res => { releaseScan = () => res(respond(scanResult)); });
     }
     return respond({});
@@ -121,9 +136,10 @@ const source = fs.readFileSync(
 // loading. A test that cannot start says much less than one that says which
 // guarantee broke.
 vm.runInNewContext(
-  source + '\n;globalThis.__test = { state, viewPrivacy,'
+  source + '\n;globalThis.__test = { state, viewPrivacy, loadAnalysis,'
   + ' repaintIf: typeof repaintIf === "function" ? repaintIf : null };', sandbox);
-const { state, viewPrivacy, repaintIf } = sandbox.__test;
+const { state, viewPrivacy, loadAnalysis, repaintIf } = sandbox.__test;
+const realFetch = sandbox.fetch;
 
 // ---------- helpers ----------
 
@@ -138,6 +154,12 @@ function walk(node, out = []) {
 function findButton(label) {
   return walk(byId.main).find(
     n => n.tagName === 'BUTTON' && n.textContent === label);
+}
+
+function findRevealToggle() {
+  const label = walk(byId.main).find(
+    n => n.tagName === 'LABEL' && n.textContent.includes('Reveal actual values'));
+  return label && label.children.find(c => c.tagName === 'INPUT');
 }
 
 const OTHER_TAB_CONTENT = 'the ramoops page the reader moved to';
@@ -250,6 +272,106 @@ async function main() {
       && byId.main.textContent.includes('boom'));
     check('with the run button offered again',
       Boolean(findButton('Run privacy scan')));
+  }
+
+  sandbox.fetch = realFetch;
+
+  // The other half of "the result is waiting when you return": while it is
+  // still running, coming back has to say so. Disabling the button that was
+  // clicked says nothing about the button drawn the next time the tab is
+  // opened, so this used to offer a fresh Run button as though nothing were
+  // happening - and clicking it scanned every file in the bundle a second
+  // time, with two handlers then racing to paint.
+  console.log('\nComing back while it is still running says so:');
+  {
+    const { running } = await startScan();
+    state.tab = 'ramoops';
+    byId.main.replaceChildren(textNode(OTHER_TAB_CONTENT));
+
+    state.tab = 'privacy';
+    byId.main.replaceChildren();
+    viewPrivacy();
+    check('the scan in progress is shown',
+      byId.main.textContent.includes('Scanning every file in the bundle'));
+    check('and no second scan is offered', !findButton('Run privacy scan'));
+
+    releaseScan();
+    await running;
+    check('the report arrives when it finishes',
+      byId.main.textContent.includes('What leaves with this file'));
+    check('and the running flag is cleared', state.piiRunning === false);
+  }
+
+  // A report belongs to the bundle it was scanned from. Showing one bundle's
+  // secrets under another bundle's name is the worst version of this mistake,
+  // so both the result and the failure have to be dropped when the selector
+  // moves - including one still in flight when it does.
+  console.log('\nA report does not follow you to another bundle:');
+  {
+    state.pii = scanResult;
+    state.piiError = 'boom';
+    state.tab = 'privacy';
+    await loadAnalysis('support-OTHER');
+    check('the previous report is forgotten', !state.pii);
+    check('so is the previous failure', !state.piiError);
+    check('and the new bundle is not shown the old report',
+      !byId.main.textContent.includes('cfg/system.cfg'));
+  }
+
+  {
+    const { running } = await startScan();
+    await loadAnalysis('support-ANOTHER');
+    releaseScan();
+    await running;
+    check('a scan that outlives its bundle is discarded, not stored',
+      state.bid === 'support-ANOTHER' && state.pii !== scanResult);
+  }
+
+  // Revealing the values re-reads the whole bundle, so it is the same wait by
+  // a different button, and it used to paint its answer unconditionally.
+  console.log('\nRevealing the values is held the same way:');
+  {
+    state.bid = 'support-TEST';
+    state.tab = 'privacy';
+    state.pii = scanResult;
+    state.piiError = null;
+    state.piiRunning = false;
+    releaseScan = null;
+    byId.main.replaceChildren();
+    viewPrivacy();
+    const toggle = findRevealToggle();
+    check('the reveal toggle is drawn', Boolean(toggle));
+    const running = toggle.onchange({ target: { checked: true } });
+    await tick();
+    check('its own wording is shown, not the first-scan wording',
+      byId.main.textContent.includes('Re-scanning with values revealed'));
+
+    state.tab = 'ramoops';
+    byId.main.replaceChildren(textNode(OTHER_TAB_CONTENT));
+    releaseScan();
+    await running;
+    check('and the re-scan does not paint over the tab you moved to',
+      byId.main.textContent === OTHER_TAB_CONTENT);
+    check('while the revealed result is kept for the tab that asked',
+      state.pii === scanResult && state.piiRunning === false);
+    state.piiReveal = false;
+  }
+
+  console.log('\nThe cleaned copy cannot be started twice either:');
+  {
+    state.bid = 'support-TEST';
+    state.tab = 'privacy';
+    state.pii = scanResult;
+    state.piiError = null;
+    state.piiRunning = false;
+    state.sanitise = { running: true };
+    byId.main.replaceChildren();
+    viewPrivacy();
+    const btn = findButton('Create cleaned copy');
+    check('the button is drawn', Boolean(btn));
+    check('but disabled while a copy is being written',
+      Boolean(btn && btn.disabled));
+    state.sanitise = null;
   }
 
   console.log('\nrepaintIf only fires for the tab that owns the work:');

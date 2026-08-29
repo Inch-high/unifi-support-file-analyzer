@@ -215,6 +215,30 @@ def main():
         check("a UniFi-looking name with no executable is still flagged",
               bool(flags_for(res, "ubnt-agent")))
 
+    # /opt and /usr/share are on the list of places stock firmware runs from,
+    # which is the right answer to "should the unusual-path flag fire" and the
+    # wrong one to "did this ship in the firmware": they are exactly where
+    # third-party software installs itself by convention. A name allowlist
+    # cannot stand on them, or an add-on called unifi-anything walks through on
+    # its name - the single thing the safeguard promises never happens.
+    print("\nA system-ish path that is not part of the firmware image:")
+    with tempfile.TemporaryDirectory() as td:
+        addon = [
+            {"pid": 980, "comm": "unifi-helper", "ppid": 1,
+             "exe": "/opt/unifi-helper/bin/unifi-helper",
+             "cmdline": "unifi-helper --daemon"},
+            {"pid": 981, "comm": "ucg-dash2", "ppid": 1,
+             "exe": "/usr/share/ucg-dash2/ucg-dash2", "cmdline": "ucg-dash2"},
+        ]
+        snapdir = Path(td) / "system/var/log/mem_snapshot"
+        snapdir.mkdir(parents=True)
+        for i in range(6):
+            write_snapshot(snapdir, f"20260824_{8 + i:02d}1701", BASELINE + addon)
+        res = procaudit.audit_processes(Path(td))
+        for name, where in (("unifi-helper", "/opt"), ("ucg-dash2", "/usr/share")):
+            check(f"{name} under {where} is still flagged",
+                  has(flags_for(res, name), "recognized unifi or debian stack"))
+
     print()
     if failures:
         print(f"{len(failures)} check(s) FAILED: {failures}")

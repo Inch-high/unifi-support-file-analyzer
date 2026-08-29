@@ -116,10 +116,28 @@ VENDOR_NAME_RE = re.compile(
     r"^(?:unifi|uos|ubios|ubnt|udapi|ulp|udm|udr|ucg|uxg|uap|usw)[-_]?[a-z0-9]",
     re.I)
 
+# Which system paths that safeguard can actually stand on. SYSTEM_EXEC_PREFIXES
+# answers a laxer question - "is this one of the directories stock firmware
+# runs from" - and includes /opt and /usr/share, which are exactly where
+# third-party software installs itself by convention. That is harmless for the
+# path flag, whose absence merely says nothing, but it cannot carry a *name*
+# allowlist: an add-on under /opt called unifi-anything would otherwise be
+# waved through on its name alone, which is the one thing the paragraph above
+# promises never happens. Only directories that are part of the read-only image
+# count here.
+FIRMWARE_EXEC_PREFIXES = (
+    "/usr/bin/", "/usr/sbin/", "/usr/lib/", "/usr/libexec/",
+    "/bin/", "/sbin/", "/lib/",
+)
 
-def _vendor_named(name, in_system):
+
+def _vendor_named(name, exe):
     """Whether this looks like vendor software that came with the firmware."""
-    return bool(name) and in_system and bool(VENDOR_NAME_RE.match(name))
+    if not name or not exe:
+        return False
+    if not any(exe.startswith(pfx) for pfx in FIRMWARE_EXEC_PREFIXES):
+        return False
+    return bool(VENDOR_NAME_RE.match(name))
 
 # Command lines worth a human look wherever they appear.
 SUSPICIOUS_CMDLINE = [
@@ -358,8 +376,8 @@ def audit_processes(root: Path, offsets=None, boot_times=None):
         in_writable = any(exe.startswith(pfx) for pfx in WRITABLE_EXEC_PREFIXES)
         in_system = any(exe.startswith(pfx) for pfx in SYSTEM_EXEC_PREFIXES)
         known = (base in KNOWN_PROCESSES or comm in KNOWN_PROCESSES
-                 or _vendor_named(base, in_system)
-                 or _vendor_named(comm, in_system))
+                 or _vendor_named(base, exe)
+                 or _vendor_named(comm, exe))
 
         # A fresh pid in every sighting means a short-lived command re-run on a
         # schedule, not something resident. Snapshots catch such processes

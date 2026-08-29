@@ -137,16 +137,73 @@ def main():
           "out-of-order timestamps" in kinds(r))
 
     # ntpd and chrony word it differently; all of them have to register.
+    from analyzer.logscan import CLOCK_SYNC_RE as _CS
     for line in ("ntpd[1]: time reset -3600.000000 s",
                  "ntpd[1]: step time server 10.0.0.1 offset -3600.0 sec",
                  "chronyd[1]: System clock wrong by -3600.0 seconds",
-                 "systemd-timesyncd[1]: Synchronized to time server 10.0.0.1:123"):
-        from analyzer.logscan import CLOCK_SYNC_RE
+                 "systemd[1]: Time has been changed",
+                 "hwclock[1]: setting system time to 2026-07-05 11:00:00 UTC",
+                 "systemd-timesyncd[1]: Initial synchronization to time server "
+                 "10.0.0.1:123 (ntp.lan)."):
         check(f"recognised: {line.split(':')[1].strip()[:34]}",
-              bool(CLOCK_SYNC_RE.search(line)))
-    from analyzer.logscan import CLOCK_SYNC_RE as _CS
-    check("routine timesyncd chatter is not treated as a correction",
-          not _CS.search("systemd-timesyncd[1]: Network configuration changed"))
+              bool(_CS.search(line)))
+
+    # Every alternative has to name a step. These are the near misses, and each
+    # one is load-bearing: the pool is shared across the whole bundle and
+    # matched on time alone, so a single false sync line excuses every
+    # backwards jump within twenty minutes of it, in any file.
+    print("\nLines that do not mean the clock moved are not corrections:")
+    for line, why in (
+            ("systemd-timesyncd[1]: Network configuration changed",
+             "unrelated timesyncd chatter"),
+            ("systemd-timesyncd[1]: Synchronized to time server 10.0.0.1:123 "
+             "(ntp.lan).",
+             "a routine sync says nothing about a step"),
+            ("dnsmasq[1]: setting time to live to 300",
+             "a resolver TTL is not a clock"),
+            ("cache[1]: Setting Time To 5 minutes for the entry",
+             "nor is a cache expiry")):
+        check(f"not a correction: {why}", not _CS.search(line))
+
+    # The pooled list is decided on, not merely displayed, so it must not stop
+    # at the first N: a log recording a sync at every boot passes any fixed cap
+    # partway through, and truncating there leaves every jump in the rest of
+    # the file looking like an edit.
+    print("\nA log full of syncs keeps them spread across its whole span:")
+    from analyzer.logscan import MAX_CLOCK_SYNCS  # noqa: E402
+    ig = _Integrity("messages")
+    n = MAX_CLOCK_SYNCS * 6
+    for i in range(n):
+        ig.feed(f"2026-07-{1 + i // 24:02d}T{i % 24:02d}:00:00 "
+                f"systemd[1]: Time has been changed\n")
+    out = ig.result(1000)
+    kept = out.get("clock_syncs") or []
+    check("the count of corrections is reported in full",
+          out.get("clock_syncs_total") == n)
+    check("the retained sample stays bounded", len(kept) <= MAX_CLOCK_SYNCS)
+    # Fed 2026-07-01 through 2026-07-10: truncating at the cap would have
+    # stopped on the 2nd, leaving eight days of jumps unexplained.
+    check("and still reaches the end of the file, not just the start",
+          bool(kept) and kept[-1]["at"] >= "2026-07-09")
+    check("with the sample spread rather than clustered at one end",
+          bool(kept) and kept[len(kept) // 2]["at"] >= "2026-07-04")
+
+    # The caveat that every other integrity finding carries would contradict
+    # this one, which has already named the line that accounts for the step.
+    print("\nThe clock-correction finding does not argue with itself:")
+    from analyzer import findings as _findings  # noqa: E402
+    _tp = run(jumped, syncs=[sync("2026-07-05T11:00:04")])
+    _fd = _findings.build_findings({"device": {}, "firmware": ""}, {"boots": []},
+                                   {}, {}, "", None, None, None, _tp)
+    _texts = [f["detail"] for f in _fd["findings"] if "Log integrity" in f["title"]]
+    check("a clock correction is stated without being hedged",
+          _texts and all("produces the same evidence" not in t for t in _texts))
+    _major = run(jumped)
+    _fdm = _findings.build_findings({"device": {}, "firmware": ""}, {"boots": []},
+                                    {}, {}, "", None, None, None, _major)
+    check("but an unexplained jump still carries the caveat",
+          any("produces the same evidence" in f["detail"]
+              for f in _fdm["findings"] if "Log integrity" in f["title"]))
 
     r = run([rec("busy.log", "2026-07-01T00:00:00+00:00", "2026-07-11T00:00:00+00:00",
                  lines=50000,
