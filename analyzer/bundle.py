@@ -85,9 +85,20 @@ def bundle_root(bid: str) -> Path:
     # like it had two roots and every path lookup silently moved up one level.
     dirs = [p for p in base.iterdir()
             if p.is_dir() and p.name not in ("cache",) and not p.name.startswith(".")]
-    if len(dirs) == 1:
-        return dirs[0]
-    return base
+    root = dirs[0] if len(dirs) == 1 else base
+
+    # Newer support bundles can wrap the real tree under `primary/`.
+    # The analyzers expect paths such as root/system/... and root/unifi/...,
+    # so stop at the directory that actually contains those families.
+    expected = ("system", "unifi", "unifi-core", "uid-agent", "ulp-go")
+    has_expected = any((root / name).is_dir() for name in expected)
+    primary = root / "primary"
+    if not has_expected and primary.is_dir():
+        primary_has_expected = any((primary / name).is_dir() for name in expected)
+        if primary_has_expected:
+            return primary
+
+    return root
 
 
 def list_bundles():
